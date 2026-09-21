@@ -116,6 +116,10 @@ export interface MailboxConnection {
 
 export interface MailboxStatus extends MailboxConnection {
   has_credentials: boolean;
+  /** Whether a mailbox address resolved (env override or stored value). */
+  has_address?: boolean;
+  /** The placeholder stored on the connection row, when an env value overrode it. */
+  configured_username?: string;
   mode: "live_imap" | "demo_deterministic";
 }
 
@@ -239,6 +243,9 @@ export interface ApiClient {
   getMailboxStatus(connId: string): Promise<MailboxStatus>;
   /** Fetch new emails from mailbox, import, and run verification. */
   retrieveMailbox(connId: string, params?: { password?: string; mode?: "auto" | "demo" | "live" }): Promise<MailboxRetrieveResult>;
+  /** Rewind the IMAP UID high-water mark so already-ingested mail can be pulled
+   * again. Needed to rehearse a demo; the mailbox itself is never modified. */
+  resetMailboxCursor(connId: string): Promise<{ connection_id: string; previous_last_uid: number; last_uid: number }>;
   /** List chronological review and reinforcement events for audit inspection. */
   listAuditEvents(limit?: number): Promise<AuditEvent[]>;
   /** List all active taught equivalence conventions across the system. */
@@ -899,6 +906,9 @@ export function createApiClient(): ApiClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params || {})
       });
+    },
+    resetMailboxCursor: async (connId) => {
+      return await request(`/mailbox/${encodeURIComponent(connId)}/reset`, { method: "POST" });
     },
     listAuditEvents: async (limit?: number) => {
       return await request<AuditEvent[]>(`/audit/events?limit=${limit ?? 200}`);

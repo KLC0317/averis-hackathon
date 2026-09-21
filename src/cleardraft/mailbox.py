@@ -27,6 +27,47 @@ from .pipeline import run_import
 from .readers import read_document
 from .store import Store, utc_now
 
+
+def _env_any(*names: str) -> str | None:
+    """First non-empty environment value among ``names``, matched case-insensitively.
+
+    Windows environment lookups fold case but POSIX ones do not, so a variable
+    written as ``app_pass`` locally would silently vanish once deployed to Linux.
+    Resolving case-insensitively keeps one .env working in both places.
+    """
+    folded = {key.casefold(): value for key, value in os.environ.items()}
+    for name in names:
+        value = os.environ.get(name) or folded.get(name.casefold())
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def resolve_mailbox_credentials(conn: dict[str, Any]) -> tuple[str, str | None]:
+    """Return the (username, password) actually used to open this mailbox.
+
+    The stored connection row carries a shipped placeholder address, so an
+    operator-supplied address in the environment takes precedence over it. Both
+    the status endpoint and the fetch path resolve through here, so what the UI
+    reports as connected is by construction what the IMAP login will use.
+    """
+    provider = str(conn.get("provider") or "").upper()
+    password = _env_any(
+        f"MAILBOX_PASSWORD_{provider}",
+        "LIVE_MAILBOX_PASSWORD",
+        "app_pass",
+        "APP_PASSWORD",
+        "GMAIL_APP_PASSWORD",
+    )
+    username = _env_any(
+        f"MAILBOX_EMAIL_{provider}",
+        "LIVE_MAILBOX_EMAIL",
+        "email",
+        "MAILBOX_EMAIL",
+        "GMAIL_EMAIL",
+    ) or str(conn.get("username") or "")
+    return username, password
+
 # Default prefilled connection presets
 DEFAULT_PRESETS = [
     {
@@ -319,12 +360,24 @@ def retrieve_mailbox_and_run(
     attachments: dict[str, bytes] = {}
     new_uid = last_uid
 
-    # Check environment variable for password if not provided in call
-    env_password = (
-        password
-        or os.environ.get(f"MAILBOX_PASSWORD_{conn.get('provider', '').upper()}")
-        or os.environ.get("LIVE_MAILBOX_PASSWORD")
-    )
+    # An explicitly supplied password wins; otherwise resolve from environment.
+    resolved_username, resolved_password = resolve_mailbox_credentials(conn)
+    env_password = password or resolved_password
+
+    # "live" is an assertion that what follows is real mail. Falling back to the
+    # demo fixture here would present fabricated messages as retrieved ones, so
+    # missing credentials fail loudly instead.
+    if mode == "live":
+        if not env_password:
+            raise RuntimeError(
+                "live retrieval requires a mailbox password; set app_pass (or "
+                "LIVE_MAILBOX_PASSWORD) in the environment"
+            )
+        if not resolved_username or "@" not in resolved_username:
+            raise RuntimeError(
+                "live retrieval requires a mailbox address; set email (or "
+                "LIVE_MAILBOX_EMAIL) in the environment"
+            )
 
     is_live = False
     if env_password and mode != "demo":
@@ -332,7 +385,7 @@ def retrieve_mailbox_and_run(
             messages, attachments, new_uid = fetch_from_imap(
                 host=conn["host"],
                 port=int(conn["port"]),
-                username=conn["username"],
+                username=resolved_username,
                 password=env_password,
                 folder=conn.get("folder", "INBOX"),
                 last_uid=last_uid,
@@ -358,7 +411,8 @@ def retrieve_mailbox_and_run(
             "import_id": None,
             "run_id": None,
             "case_ids": [],
-            "cases": []
+            "cases": [],
+            "is_live_server": is_live,
         }
 
     # Step 2: Import messages using ParticipantSource contract

@@ -816,24 +816,44 @@ def create_app(db_path: str | None = None):
         conn = store.get_mailbox_connection(conn_id)
         if not conn:
             raise HTTPException(404, "mailbox connection not found")
-        has_password = bool(
-            os.environ.get(f"MAILBOX_PASSWORD_{conn.get('provider', '').upper()}")
-            or os.environ.get("LIVE_MAILBOX_PASSWORD")
-        )
+        from .mailbox import resolve_mailbox_credentials
+        # Report the address the IMAP login will actually use, not the shipped
+        # placeholder, so the UI cannot show "connected" for a different mailbox.
+        effective_username, password = resolve_mailbox_credentials(conn)
+        has_password = bool(password)
+        ready = has_password and "@" in effective_username
         return {
             "id": conn["id"],
             "label": conn["label"],
             "provider": conn["provider"],
             "host": conn["host"],
             "port": conn["port"],
-            "username": conn["username"],
+            "username": effective_username,
+            "configured_username": conn["username"],
             "folder": conn["folder"],
             "status": conn["status"],
             "last_uid": conn["last_uid"],
             "last_polled_at": conn["last_polled_at"],
             "has_credentials": has_password,
-            "mode": "live_imap" if has_password else "demo_deterministic",
+            "has_address": "@" in effective_username,
+            "mode": "live_imap" if ready else "demo_deterministic",
         }
+
+    @app.post("/api/v1/mailbox/{conn_id}/reset")
+    @app.post("/mailbox/{conn_id}/reset")
+    def reset_mailbox_cursor(conn_id: str) -> dict[str, Any]:
+        """Rewind the UID high-water mark so already-seen mail can be re-ingested.
+
+        Retrieval is read-only and only ever moves the cursor forward, which means
+        a rehearsed demo otherwise reports "up to date" on the second run. This
+        rewinds the cursor only; the mailbox itself is never modified.
+        """
+        conn = store.get_mailbox_connection(conn_id)
+        if not conn:
+            raise HTTPException(404, "mailbox connection not found")
+        previous = int(conn.get("last_uid") or 0)
+        store.update_mailbox_cursor(conn_id, 0, status="ready", last_polled_at=None)
+        return {"connection_id": conn_id, "previous_last_uid": previous, "last_uid": 0}
 
     @app.post("/api/v1/mailbox/{conn_id}/retrieve")
     @app.post("/mailbox/{conn_id}/retrieve")

@@ -25,6 +25,7 @@ import {
   Plus,
   Radio,
   RefreshCw,
+  RotateCcw,
   Search,
   Server,
   Shield,
@@ -57,6 +58,9 @@ export default function LiveMailboxPage() {
   const [retrieving, setRetrieving] = useState(false);
   const [activeStep, setActiveStep] = useState<number>(0);
   const [retrieveResult, setRetrieveResult] = useState<MailboxRetrieveResult | null>(null);
+  // Defaults to live: during a demo, silently showing fixtures as if they were
+  // retrieved mail is far worse than an explicit connection error.
+  const [retrieveMode, setRetrieveMode] = useState<"live" | "demo">("live");
 
   // Feature A curation tab state
   const [activeTab, setActiveTab] = useState<"sources" | "curation">("sources");
@@ -108,22 +112,37 @@ export default function LiveMailboxPage() {
     const stepTimer2 = setTimeout(() => setActiveStep(3), 1100);
 
     try {
-      const res = await apiClient.retrieveMailbox(connId, { mode: "auto" });
+      // "live" fails loudly rather than substituting demo fixtures, so what is
+      // shown on screen is never fabricated mail presented as retrieved mail.
+      const res = await apiClient.retrieveMailbox(connId, { mode: retrieveMode });
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
       setActiveStep(4);
       setRetrieveResult(res);
 
       if (res.new_count > 0) {
-        toast(`Ingested ${res.new_count} new email(s) · Verification pipeline complete`, "success");
+        const origin = res.is_live_server ? "live IMAP" : "demo fixture";
+        toast(`Ingested ${res.new_count} email(s) from ${origin} · pipeline complete`, "success");
       } else {
-        toast("Mailbox is up to date · No new unread messages above high-water mark", "info");
+        toast("Mailbox is up to date · No new messages above high-water mark", "info");
       }
       loadConnections();
     } catch (err: any) {
       toast(err?.message || "Failed to retrieve from mailbox", "warning");
     } finally {
       setRetrieving(false);
+    }
+  };
+
+  const handleResetCursor = async (connId: string) => {
+    try {
+      const res = await apiClient.resetMailboxCursor(connId);
+      toast(`Cursor rewound from UID ${res.previous_last_uid} to 0 · mail can be re-ingested`, "success");
+      setRetrieveResult(null);
+      setActiveStep(0);
+      loadConnections();
+    } catch (err: any) {
+      toast(err?.message || "Failed to reset cursor", "warning");
     }
   };
 
@@ -171,6 +190,45 @@ export default function LiveMailboxPage() {
         description="Source-agnostic shipping document ingestion via read-only IMAP protocols (RFC 3501 EXAMINE mode)."
         actions={
           <>
+            {/* Explicit source selector: the operator always knows whether what
+                appears next came from a real inbox or a deterministic fixture. */}
+            <div
+              role="group"
+              aria-label="Retrieval source"
+              style={{
+                display: "flex", border: "1px solid var(--border-default)",
+                borderRadius: "6px", overflow: "hidden"
+              }}
+            >
+              {(["live", "demo"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setRetrieveMode(m)}
+                  disabled={retrieving}
+                  title={m === "live"
+                    ? "Connect to the real IMAP mailbox; fails loudly if credentials are missing"
+                    : "Use the built-in deterministic fixture; never touches the network"}
+                  style={{
+                    padding: "6px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                    border: "none",
+                    background: retrieveMode === m ? "var(--primary)" : "transparent",
+                    color: retrieveMode === m ? "#ffffff" : "var(--ink-secondary)"
+                  }}
+                >
+                  {m === "live" ? "Live" : "Demo"}
+                </button>
+              ))}
+            </div>
+            <Button
+              variant="secondary"
+              icon={<RotateCcw size={15} />}
+              onClick={() => handleResetCursor(selectedConnId)}
+              disabled={refreshing || retrieving}
+              title="Rewind the UID cursor so already-ingested mail can be pulled again"
+            >
+              Reset cursor
+            </Button>
             <Button
               variant="secondary"
               icon={<RefreshCw size={15} className={refreshing ? "spin" : undefined} />}
@@ -185,7 +243,7 @@ export default function LiveMailboxPage() {
               onClick={() => handleRetrieve(selectedConnId)}
               disabled={retrieving}
             >
-              {retrieving ? "Retrieving..." : "Retrieve Latest"}
+              {retrieving ? "Retrieving..." : retrieveMode === "live" ? "Retrieve Live" : "Retrieve Demo"}
             </Button>
           </>
         }
