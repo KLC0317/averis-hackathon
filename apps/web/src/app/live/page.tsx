@@ -122,7 +122,8 @@ export default function LiveMailboxPage() {
 
       if (res.new_count > 0) {
         const origin = res.is_live_server ? "live IMAP" : "demo fixture";
-        toast(`Ingested ${res.new_count} email(s) from ${origin} · pipeline complete`, "success");
+        const gateway = res.run_mode === "live_ai" ? "gateway can escalate to DeepSeek" : "local rules only, no AI key configured";
+        toast(`Ingested ${res.new_count} email(s) from ${origin} · ${gateway}`, "success");
       } else {
         toast("Mailbox is up to date · No new messages above high-water mark", "info");
       }

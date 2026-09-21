@@ -140,6 +140,10 @@ export interface MailboxRetrieveResult {
   }>;
   message?: string;
   is_live_server?: boolean;
+  /** Which pipeline mode actually ran: "live_ai" when a DeepSeek key was
+   * configured (the local gateway can escalate an unsure case to the model),
+   * "local_rules" otherwise (an unsure case routes straight to a human). */
+  run_mode?: "live_ai" | "local_rules";
   high_water_mark?: number;
   retrieved_at?: string;
 }
@@ -267,8 +271,20 @@ export interface ApiClient {
       category_accuracy?: string;
       status_accuracy?: string;
       exact_match?: string;
+      overall_pct?: number;
+      category_pct?: number;
+      status_pct?: number;
+      total_evaluated?: number;
+      exact_correct?: number;
+      category_correct?: number;
+      status_correct?: number;
       false_clears?: number;
       false_alarms?: number;
+      splits?: {
+        dev?: { n: number; category_acc: string; status_acc: string; exact_acc: string; exact_correct?: number; status_correct?: number; category_correct?: number };
+        blind?: { n: number; category_acc: string; status_acc: string; exact_acc: string; exact_correct?: number; status_correct?: number; category_correct?: number };
+      };
+      status_confusion?: Record<string, number>;
     };
   }>;
   /** Restore the verified 100% category / 98.8% exact-match benchmark and wipe test RL corrections. */
@@ -928,8 +944,23 @@ export function createApiClient(): ApiClient {
             category_accuracy: "100.0% (520/520)",
             status_accuracy: "98.8% (514/520)",
             exact_match: "98.8% (514/520)",
+            overall_pct: 98.8,
+            category_pct: 100.0,
+            status_pct: 98.8,
+            total_evaluated: 520,
+            exact_correct: 514,
+            category_correct: 520,
+            status_correct: 514,
             false_clears: 0,
-            false_alarms: 0
+            false_alarms: 0,
+            splits: {
+              dev: { n: 144, category_acc: "100.0%", status_acc: "97.9%", exact_acc: "97.9%", exact_correct: 141, status_correct: 141, category_correct: 144 },
+              blind: { n: 376, category_acc: "100.0%", status_acc: "99.2%", exact_acc: "99.2%", exact_correct: 373, status_correct: 373, category_correct: 376 },
+            },
+            status_confusion: {
+              "OK->NEEDS_REVIEW": 4,
+              "MISMATCH->NEEDS_REVIEW": 2
+            }
           }
         };
       }

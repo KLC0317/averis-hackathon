@@ -419,8 +419,15 @@ def retrieve_mailbox_and_run(
     source = MailboxSource(messages, attachments)
     import_id = import_participant(source, store, source_type="mailbox")
 
-    # Step 3: Run pipeline
-    run_id, _ = run_import(store, import_id, mode="local_rules")
+    # Step 3: Run pipeline. Every message is still read by the deterministic
+    # local rules first (gateway.py); a DeepSeek key only makes the second
+    # opinion *available* for whatever the local gateway itself is unsure
+    # about, exactly as CLI/API runs already work. Absent a key, mail escalated
+    # by the gateway routes straight to a human instead of the model - never a
+    # silent downgrade to a lower-confidence answer.
+    ai_configured = bool(os.environ.get("DEEPSEEK_KEY") or os.environ.get("DEEPSEEK_API_KEY"))
+    run_mode = "live_ai" if ai_configured else "local_rules"
+    run_id, _ = run_import(store, import_id, mode=run_mode)
 
     # Step 4: Advance cursor
     now_str = utc_now()
@@ -456,6 +463,7 @@ def retrieve_mailbox_and_run(
         "case_ids": case_ids,
         "cases": cases_list,
         "is_live_server": is_live,
+        "run_mode": run_mode,
         "high_water_mark": new_uid,
         "retrieved_at": now_str,
     }
