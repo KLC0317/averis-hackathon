@@ -57,11 +57,10 @@ export default function HistoryPage() {
 
   const loadHistory = (announce = false) => {
     setRefreshing(true);
-    return apiClient
-      .getCase(requestedId)
-      .then((live) => {
+    return Promise.all([apiClient.getCase(requestedId), apiClient.getCaseHistory(requestedId)])
+      .then(([live, history]) => {
         setDetail(live);
-        setEvents(live.reviewEvents ?? []);
+        setEvents(history.reviewEvents);
         setLiveConnected(true);
         if (announce) toast("Audit history refreshed from the API", "success");
       })
@@ -82,12 +81,11 @@ export default function HistoryPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    apiClient
-      .getCase(requestedId)
-      .then((live) => {
+    Promise.all([apiClient.getCase(requestedId), apiClient.getCaseHistory(requestedId)])
+      .then(([live, history]) => {
         if (cancelled) return;
         setDetail(live);
-        setEvents(live.reviewEvents ?? []);
+        setEvents(history.reviewEvents);
         setLiveConnected(true);
       })
       .catch(() => {

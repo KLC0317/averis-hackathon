@@ -214,6 +214,41 @@ def create_app(db_path: str | None = None):
         payload["review_events"] = store.list_review_events(value["id"])
         return payload
 
+    @app.get("/api/v1/cases/{case_id}/history")
+    @app.get("/cases/{case_id}/history")
+    def case_history(case_id: str) -> dict[str, Any]:
+        case = store.get_case(case_id)
+        if not case:
+            with store.connect() as db:
+                row = db.execute("SELECT id FROM cases WHERE email_id=? ORDER BY updated_at DESC LIMIT 1", (case_id,)).fetchone()
+            case = store.get_case(row["id"]) if row else None
+        if not case:
+            raise HTTPException(404, "case not found")
+        with store.connect() as db:
+            documents = [dict(row) for row in db.execute(
+                "SELECT id,filename,format,sha256,size,created_at,attachment_path FROM documents WHERE import_id=? AND email_id=? ORDER BY created_at",
+                (case["import_id"], case["email_id"]),
+            ).fetchall()]
+            pairs = [dict(row) for row in db.execute(
+                "SELECT * FROM comparison_pairs WHERE case_id=? ORDER BY created_at", (case["id"],)
+            ).fetchall()]
+            runs = []
+            for row in db.execute("SELECT * FROM runs WHERE import_id=? ORDER BY created_at", (case["import_id"],)).fetchall():
+                value = dict(row)
+                result = json.loads(value.pop("result_json") or "{}")
+                value["result"] = result.get(case["email_id"], result)
+                runs.append(value)
+        return {
+            "case_id": case["id"],
+            "email_id": case["email_id"],
+            "current_version": case["version"],
+            "current_result": case.get("result") or {},
+            "documents": documents,
+            "pairs": pairs,
+            "runs": runs,
+            "review_events": store.list_review_events(case["id"]),
+        }
+
     @app.get("/api/v1/documents/{document_id}/source")
     @app.get("/documents/{document_id}/source")
     def document_source(document_id: str):
@@ -254,20 +289,26 @@ def create_app(db_path: str | None = None):
             raise HTTPException(409, detail={"code": "stale_case", "current_version": case["version"]})
         result = case.get("result") or {}
         action = str(body.get("action", "confirm_finding"))
+        if action not in {"confirm_finding", "correct_reading", "cannot_read"}:
+            raise HTTPException(400, detail={"code": "invalid_review_action", "message": "unsupported review action"})
         field_name = body.get("field") or body.get("field_name")
         new_result = result
+        side = str(body.get("side", "bl")).casefold()
+        if side not in {"si", "bl"}:
+            raise HTTPException(400, detail={"code": "invalid_review_side", "message": "side must be si or bl"})
         run_id: str | None = None
         old_value: str | None = None
         if field_name:
             fields = {item["field"]: item for item in result.get("fields", [])}
             if field_name not in fields:
                 raise HTTPException(400, "unknown comparison field")
-            old_value = fields[field_name]["bl"].get("raw_value")
+            old_value = fields[field_name][side].get("raw_value")
             si = {item["field"]: _obs_from_dict(item["si"]) for item in result.get("fields", [])}
             bl = {item["field"]: _obs_from_dict(item["bl"]) for item in result.get("fields", [])}
-            side = str(body.get("side", "bl")).casefold()
             if action == "correct_reading":
                 corrected = body.get("corrected_reading", body.get("correctedReading"))
+                if not isinstance(corrected, str) or not corrected.strip():
+                    raise HTTPException(400, "corrected reading is required")
                 canonical, steps = normalize_field(field_name, corrected)
                 if canonical is None:
                     raise HTTPException(400, "corrected reading is empty or unsupported")
@@ -283,15 +324,23 @@ def create_app(db_path: str | None = None):
                 target[field_name].raw_value = None
             compared = compare_documents(si, bl, category=case.get("category") or "BL_COMPARISON", issues=result.get("issues", []))
             new_result = _result_json(compared)
-            digest = hashlib.sha256(json.dumps(new_result, sort_keys=True).encode()).hexdigest()
-            run_id = store.create_run(case["import_id"], "assisted_review", digest, "review-v1")
+        digest = hashlib.sha256(json.dumps(new_result, sort_keys=True).encode()).hexdigest()
+        run_id = store.create_run(case["import_id"], "assisted_review", digest, "review-v1")
+        if field_name:
             store.complete_run(run_id, {case["email_id"]: compared.to_submission()})
-            if not store.save_case_result_if_version(run_id, case_id, case.get("category") or "BL_COMPARISON", case.get("classification") or {}, new_result, compared.verification, expected):
-                raise HTTPException(409, detail={"code": "stale_case"})
-        event_id = store.create_review_event(case_id=case_id, run_id=run_id, action=action, field=field_name,
-                                             side=body.get("side"), old_value=old_value,
-                                             new_value=body.get("corrected_reading", body.get("correctedReading")),
-                                             reason=body.get("reason"), evidence=body.get("evidence_refs", body.get("evidenceRefs", [])), expected_version=expected)
+        else:
+            store.complete_run(run_id, {case["email_id"]: {"status": "REVIEWED"}})
+        applied, event_id = store.save_case_result_and_review_if_version(
+            run_id=run_id, case_id=case_id, category=case.get("category") or "BL_COMPARISON",
+            classification=case.get("classification") or {}, result=new_result,
+            verification=new_result.get("verification", case.get("verification") or "NEEDS_REVIEW"),
+            action=action, field=field_name, side=side, old_value=old_value,
+            new_value=body.get("corrected_reading", body.get("correctedReading")),
+            reason=body.get("reason"), evidence=body.get("evidence_refs", body.get("evidenceRefs", [])),
+            expected_version=expected,
+        )
+        if not applied:
+            raise HTTPException(409, detail={"code": "stale_case", "current_version": (store.get_case(case_id) or {}).get("version")})
         return {"event_id": event_id, "run_id": run_id, "case": get_case(case_id)}
 
     @app.post("/api/v1/cases/{case_id}/documents")

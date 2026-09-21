@@ -33,6 +33,17 @@ export interface ReadinessStatus {
   checkedAt: string;
 }
 
+export interface CaseHistory {
+  caseId: string;
+  emailId: string;
+  currentVersion: number;
+  currentResult: Record<string, unknown>;
+  documents: Array<Record<string, unknown>>;
+  pairs: Array<Record<string, unknown>>;
+  runs: Array<Record<string, unknown>>;
+  reviewEvents: ReviewEvent[];
+}
+
 export interface DraftRecord {
   id: string;
   caseId: string;
@@ -61,6 +72,7 @@ export interface ApiClient {
   getReadiness(): Promise<ReadinessStatus>;
   listCases(params?: { category?: string; state?: string; query?: string }): Promise<CaseSummary[]>;
   getCase(id: string): Promise<CaseDetail>;
+  getCaseHistory(caseId: string): Promise<CaseHistory>;
   listReviewEvents(caseId: string): Promise<ReviewEvent[]>;
   getSourcePreview(documentId: string): Promise<SourcePreview>;
   listImports(): Promise<ImportRecord[]>;
@@ -332,6 +344,19 @@ export function createApiClient(): ApiClient {
     },
     listCases: async (params) => (await request<any[]>(`/cases?${new URLSearchParams((params ?? {}) as Record<string, string>)}`)).map(mapSummary),
     getCase: async (id) => mapDetail(await request<any>(`/cases/${encodeURIComponent(id)}`)),
+    getCaseHistory: async (caseId) => {
+      const value = await request<any>(`/cases/${encodeURIComponent(caseId)}/history`);
+      return {
+        caseId: value.case_id,
+        emailId: value.email_id,
+        currentVersion: value.current_version ?? 0,
+        currentResult: value.current_result ?? {},
+        documents: value.documents ?? [],
+        pairs: value.pairs ?? [],
+        runs: value.runs ?? [],
+        reviewEvents: (value.review_events ?? []).map(mapReviewEvent)
+      };
+    },
     listReviewEvents: async (caseId) => {
       const value = await request<any>(`/cases/${encodeURIComponent(caseId)}`);
       return (value.review_events ?? []).map(mapReviewEvent);
