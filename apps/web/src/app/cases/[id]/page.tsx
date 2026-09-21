@@ -244,6 +244,11 @@ function CaseDetailView({ id }: { id: string }) {
   const currentPrecedent = detail?.precedents?.[currentField.key];
 
   const hasComparisonFields = Boolean(detail?.fields && detail.fields.length > 0);
+  // Which case-level actions are worth promoting depends on what this case needs:
+  // an unconfirmed category makes category correction the primary action, and
+  // document pairing is only meaningful once there are two documents to pair.
+  const needsCategoryDecision = detail.state === "Needs classification review";
+  const canConfigurePairing = (detail.documents?.length ?? 0) >= 2;
   const mismatchCount = useMemo(() => detail.fields?.filter((f) => f.status !== "OK").length ?? 0, [detail.fields]);
   const matchCount = useMemo(() => detail.fields?.filter((f) => f.status === "OK").length ?? 0, [detail.fields]);
 
@@ -737,15 +742,20 @@ function CaseDetailView({ id }: { id: string }) {
           </div>
 
           <div className="case-header-actions">
-            <button
-              type="button"
-              className="case-action-btn case-btn-correct"
-              onClick={() => setCorrectionModalOpen(true)}
-              title="Operator category arbitration & feedback loop (In-context learning memory)"
-            >
-              <Sparkles size={14} className="case-btn-icon" />
-              <span>Correct category</span>
-            </button>
+            {/* Promoted only when fixing the category IS the task. On every other
+                case it stays in the overflow menu rather than competing for
+                attention with the action the operator actually needs. */}
+            {needsCategoryDecision && (
+              <button
+                type="button"
+                className="case-action-btn case-btn-correct"
+                onClick={() => setCorrectionModalOpen(true)}
+                title="Operator category arbitration & feedback loop (In-context learning memory)"
+              >
+                <Sparkles size={14} className="case-btn-icon" />
+                <span>Correct category</span>
+              </button>
+            )}
 
             {detail.disposition === "OPERATOR_CLOSED" ? (
               <button
@@ -781,16 +791,14 @@ function CaseDetailView({ id }: { id: string }) {
               <span>View history</span>
             </button>
 
-            <button
-              type="button"
-              className="case-action-btn case-btn-upload"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              title="Upload new carrier document revision (SI / Draft B/L)"
-            >
-              {uploading ? <LoaderCircle size={14} className="spin case-btn-icon" /> : <Upload size={14} className="case-btn-icon" />}
-              <span>{uploading ? "Uploading…" : "Upload revision"}</span>
-            </button>
+            {/* Upload is a recovery path, not a primary action - shown inline only
+                while in progress so the operator keeps sight of it. */}
+            {uploading && (
+              <button type="button" className="case-action-btn case-btn-upload" disabled>
+                <LoaderCircle size={14} className="spin case-btn-icon" />
+                <span>Uploading…</span>
+              </button>
+            )}
 
             <div style={{ position: "relative" }}>
               <button
@@ -818,28 +826,46 @@ function CaseDetailView({ id }: { id: string }) {
                     borderRadius: "8px"
                   }}
                 >
+                  {/* Already promoted to the header when the category is the
+                      open question; listing it twice would be redundant. */}
+                  {!needsCategoryDecision && (
+                    <button
+                      className="nav-item"
+                      style={{ width: "100%", padding: "6px 10px", fontSize: "12px" }}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setCorrectionModalOpen(true);
+                      }}
+                    >
+                      <Sparkles size={14} style={{ color: "var(--primary)" }} />
+                      <span>Correct category & rationale</span>
+                    </button>
+                  )}
                   <button
                     className="nav-item"
                     style={{ width: "100%", padding: "6px 10px", fontSize: "12px" }}
                     onClick={() => {
                       setMoreMenuOpen(false);
-                      setCorrectionModalOpen(true);
+                      fileInputRef.current?.click();
                     }}
+                    disabled={uploading}
                   >
-                    <Sparkles size={14} style={{ color: "var(--primary)" }} />
-                    <span>Correct category & rationale</span>
+                    <Upload size={14} />
+                    <span>Upload revision</span>
                   </button>
-                  <button
-                    className="nav-item"
-                    style={{ width: "100%", padding: "6px 10px", fontSize: "12px" }}
-                    onClick={() => {
-                      setMoreMenuOpen(false);
-                      setShowSourceControls(true);
-                    }}
-                  >
-                    <FileCheck2 size={14} />
-                    <span>Configure doc pairing</span>
-                  </button>
+                  {canConfigurePairing && (
+                    <button
+                      className="nav-item"
+                      style={{ width: "100%", padding: "6px 10px", fontSize: "12px" }}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setShowSourceControls(true);
+                      }}
+                    >
+                      <FileCheck2 size={14} />
+                      <span>Configure doc pairing</span>
+                    </button>
+                  )}
                   <button
                     className="nav-item"
                     style={{ width: "100%", padding: "6px 10px", fontSize: "12px" }}
@@ -1945,6 +1971,77 @@ function CaseDetailView({ id }: { id: string }) {
                 disabled={submittingCorrection || !correctionRationale.trim()}
               >
                 {submittingCorrection ? "Re-verifying..." : "Apply & Re-verify"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Close Case Modal - terminal disposition for a genuine, actioned discrepancy.
+          Deliberately never alters the finding: the mismatch stays on record. */}
+      {closeModalOpen && (
+        <div className="modal-overlay" onClick={() => setCloseModalOpen(false)}>
+          <div className="command-modal" style={{ maxWidth: "540px", padding: "24px" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Archive size={18} style={{ color: "var(--primary)" }} />
+                <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0 }}>Close Case</h3>
+              </div>
+              <button className="icon-btn" style={{ width: "30px", height: "30px" }} onClick={() => setCloseModalOpen(false)}>
+                <X size={15} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: "12px", color: "var(--ink-muted)", margin: "0 0 14px 0", lineHeight: "1.5" }}>
+              Use this when the discrepancy is <strong>real</strong> and you have actioned it outside the system.
+              The findings stay exactly as they are — this is not a clear, and nothing is marked as matching.
+            </p>
+
+            {mismatchCount > 0 && (
+              <div
+                style={{
+                  background: "rgba(245, 158, 11, 0.08)",
+                  border: "1px solid rgba(245, 158, 11, 0.35)",
+                  borderRadius: "6px",
+                  padding: "10px 12px",
+                  marginBottom: "14px",
+                  display: "flex",
+                  gap: "8px",
+                  alignItems: "flex-start"
+                }}
+              >
+                <TriangleAlert size={14} style={{ color: "#b45309", flexShrink: 0, marginTop: "1px" }} />
+                <span style={{ fontSize: "11.5px", color: "var(--ink-secondary)", lineHeight: 1.45 }}>
+                  {mismatchCount} unresolved {mismatchCount === 1 ? "field remains" : "fields remain"} on this case.
+                  Every one must carry a review decision before it can be closed — the server rejects the close otherwise.
+                </span>
+              </div>
+            )}
+
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ fontSize: "12px", color: "var(--ink)", fontWeight: 600, display: "block", marginBottom: "6px" }}>
+                How was this handled? <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <textarea
+                className="search-field"
+                style={{ width: "100%", height: "80px", padding: "10px", resize: "none", fontSize: "12px", lineHeight: "1.4" }}
+                placeholder="Record the action taken (e.g. 'Notified carrier by email, corrected BL requested — ref TKT-4412'). Stored on the audit trail."
+                value={closeRationale}
+                onChange={(e) => setCloseRationale(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <Button variant="secondary" onClick={() => setCloseModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                icon={<Archive size={14} />}
+                onClick={handleCloseCase}
+                disabled={submittingClose || !closeRationale.trim()}
+              >
+                {submittingClose ? "Closing…" : "Close case"}
               </Button>
             </div>
           </div>

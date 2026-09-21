@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   AlertTriangle,
+  Archive,
   ArrowRight,
   Check,
   CheckCircle2,
@@ -23,13 +24,16 @@ import {
   GitCompare,
   HelpCircle,
   Layers,
+  LoaderCircle,
   Mail,
   MapPin,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
   Sparkles,
+  Square,
   TrendingUp,
   User,
   X,
@@ -68,6 +72,7 @@ interface TodoTask {
   affectedFields: string[];
   routeLocation: string | null;
   isCompleted: boolean;
+  caseVersion: number;
 }
 
 // Extract trade route, port, or destination from shipping correspondence subject
@@ -135,9 +140,9 @@ export default function TodoPage() {
   const [query, setQuery] = useState("");
   const [filterTab, setFilterTab] = useState<FilterCategory>("ALL");
   const [sortBy, setSortBy] = useState<"PRIORITY" | "DIFFS" | "NEWEST">("PRIORITY");
-  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
   // Load cases and metrics
   const loadData = () => {
@@ -202,7 +207,10 @@ export default function TodoPage() {
         fields.push("Draft B/L Missing");
       }
 
-      const isMarkedDone = completedTaskIds.has(item.id) || item.state === "Complete";
+      // Completion is whatever the server says it is - a task is done when the
+      // case is verified complete or an operator closed it. No client-only state:
+      // the queue must never disagree with the audit trail.
+      const isMarkedDone = item.state === "Complete" || item.state === "Closed";
       const routeLocation = extractRouteLocation(item.subject);
 
       return {
@@ -220,10 +228,11 @@ export default function TodoPage() {
         type,
         affectedFields: fields,
         routeLocation,
-        isCompleted: isMarkedDone
+        isCompleted: isMarkedDone,
+        caseVersion: item.caseVersion
       };
     });
-  }, [casesList, completedTaskIds]);
+  }, [casesList]);
 
   // Derived counts
   const totalTasks = tasks.length;
@@ -289,19 +298,53 @@ export default function TodoPage() {
     return filteredTasks.slice(start, start + PAGE_SIZE);
   }, [filteredTasks, safePage]);
 
-  // Toggle completion
-  const toggleTaskCompletion = (taskId: string) => {
-    setCompletedTaskIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) {
-        next.delete(taskId);
-        toast("Task moved back to active to-do list", "info");
-      } else {
-        next.add(taskId);
-        toast("Task marked as completed", "success");
+  // Toggle completion. This always hits the server: a task can only leave the
+  // queue if the case is genuinely Complete (a verified match) or Closed (a
+  // real discrepancy the operator has actioned). Closing requires a rationale
+  // and is refused server-side unless every open field already has a review
+  // decision - the client cannot fake either condition.
+  const toggleTaskCompletion = async (task: TodoTask) => {
+    if (task.isCompleted) {
+      setPendingIds((prev) => new Set(prev).add(task.id));
+      try {
+        const { case: updated } = await apiClient.reopenCase(task.caseId, { caseVersion: task.caseVersion });
+        setCasesList((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+        toast("Case reopened and back in the active queue", "info");
+      } catch (err) {
+        const apiErr = err as { code?: string; message?: string };
+        toast(apiErr.code === "stale_case"
+          ? "Could not reopen: case changed on server. Refresh and retry."
+          : apiErr.message ?? "Could not reopen case", "warning");
+      } finally {
+        setPendingIds((prev) => { const next = new Set(prev); next.delete(task.id); return next; });
       }
-      return next;
-    });
+      return;
+    }
+    if (task.confirmedDifferences === 0) {
+      toast("This case has no confirmed discrepancy to close - review it on the case page.", "info");
+      return;
+    }
+    const reason = window.prompt(
+      `How was "${task.subject}" actioned? This is recorded on the audit trail; the finding itself is not changed.`
+    );
+    if (!reason || !reason.trim()) return;
+    setPendingIds((prev) => new Set(prev).add(task.id));
+    try {
+      const { case: updated } = await apiClient.closeCase(task.caseId, { reason: reason.trim(), caseVersion: task.caseVersion });
+      setCasesList((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+      toast("Case closed · findings preserved in the audit trail", "success");
+    } catch (err) {
+      const apiErr = err as { code?: string; message?: string };
+      if (apiErr.code === "unreviewed_fields") {
+        toast("Every open field must be reviewed on the case page before this can be closed.", "warning");
+      } else if (apiErr.code === "stale_case") {
+        toast("Could not close: case changed on server. Refresh and retry.", "warning");
+      } else {
+        toast(apiErr.message ?? "Could not close case", "warning");
+      }
+    } finally {
+      setPendingIds((prev) => { const next = new Set(prev); next.delete(task.id); return next; });
+    }
   };
 
   const handleSelectAll = () => {
@@ -312,13 +355,45 @@ export default function TodoPage() {
     }
   };
 
-  const handleBatchComplete = () => {
-    setCompletedTaskIds((prev) => {
+  // Batch-close, reported honestly: each case is closed independently, and a
+  // case with unreviewed fields or a stale version is skipped rather than
+  // silently counted as resolved.
+  const handleBatchComplete = async () => {
+    const targets = tasks.filter((t) => selectedIds.includes(t.id) && !t.isCompleted && t.confirmedDifferences > 0);
+    if (targets.length === 0) {
+      toast("Nothing selected is eligible to close (no confirmed discrepancy, or already resolved).", "info");
+      return;
+    }
+    const reason = window.prompt(
+      `How were these ${targets.length} cases actioned? Recorded on each case's audit trail.`
+    );
+    if (!reason || !reason.trim()) return;
+    setPendingIds((prev) => {
       const next = new Set(prev);
-      selectedIds.forEach((id) => next.add(id));
+      targets.forEach((t) => next.add(t.id));
       return next;
     });
-    toast(`Marked ${selectedIds.length} tasks as resolved`, "success");
+    let closed = 0;
+    let skipped = 0;
+    for (const task of targets) {
+      try {
+        const { case: updated } = await apiClient.closeCase(task.caseId, { reason: reason.trim(), caseVersion: task.caseVersion });
+        setCasesList((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+        closed += 1;
+      } catch {
+        skipped += 1;
+      }
+    }
+    setPendingIds((prev) => {
+      const next = new Set(prev);
+      targets.forEach((t) => next.delete(t.id));
+      return next;
+    });
+    if (skipped === 0) {
+      toast(`Closed ${closed} case${closed === 1 ? "" : "s"}`, "success");
+    } else {
+      toast(`Closed ${closed}, skipped ${skipped} (unreviewed fields or stale version) - open those on the case page.`, "warning");
+    }
     setSelectedIds([]);
   };
 
@@ -585,6 +660,27 @@ export default function TodoPage() {
                   apiClient.prefetchCase?.(task.caseId);
                 }}
               >
+                <button
+                  type="button"
+                  aria-label={isSelected ? "Deselect task" : "Select task"}
+                  onClick={() =>
+                    setSelectedIds((prev) =>
+                      isSelected ? prev.filter((id) => id !== task.id) : [...prev, task.id]
+                    )
+                  }
+                  style={{
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "flex-start",
+                    padding: "2px 8px 0 2px",
+                    color: isSelected ? "var(--primary)" : "var(--ink-muted)",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer"
+                  }}
+                >
+                  {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                </button>
                 <div className="todo-io-left">
                   {/* IO Entry Body Content */}
                   <div className="todo-io-body">
@@ -712,6 +808,44 @@ export default function TodoPage() {
 
                 {/* Right Action CTA */}
                 <div className="todo-io-action-col">
+                  {/* Reopen is always safe to offer. Close is only offered for a
+                      confirmed discrepancy - the server still enforces that every
+                      open field has a review decision before it accepts the close. */}
+                  {task.isCompleted ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleTaskCompletion(task)}
+                      disabled={pendingIds.has(task.id)}
+                      title="Return this case to the active review queue"
+                      style={{
+                        display: "flex", alignItems: "center", gap: "6px",
+                        fontSize: "12px", fontWeight: 600, color: "var(--ink-secondary)",
+                        background: "transparent", border: "1px solid var(--border-default)",
+                        borderRadius: "6px", padding: "6px 10px", marginBottom: "6px", cursor: "pointer",
+                        opacity: pendingIds.has(task.id) ? 0.6 : 1
+                      }}
+                    >
+                      {pendingIds.has(task.id) ? <LoaderCircle size={12} className="spin" /> : <RotateCcw size={12} />}
+                      <span>Reopen</span>
+                    </button>
+                  ) : task.type === "DISCREPANCY" && task.confirmedDifferences > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleTaskCompletion(task)}
+                      disabled={pendingIds.has(task.id)}
+                      title="Close this case with its findings intact (discrepancy confirmed and actioned)"
+                      style={{
+                        display: "flex", alignItems: "center", gap: "6px",
+                        fontSize: "12px", fontWeight: 600, color: "var(--ink-secondary)",
+                        background: "transparent", border: "1px solid var(--border-default)",
+                        borderRadius: "6px", padding: "6px 10px", marginBottom: "6px", cursor: "pointer",
+                        opacity: pendingIds.has(task.id) ? 0.6 : 1
+                      }}
+                    >
+                      {pendingIds.has(task.id) ? <LoaderCircle size={12} className="spin" /> : <Archive size={12} />}
+                      <span>Close</span>
+                    </button>
+                  ) : null}
                   <Link
                     href={`/cases/${task.caseId}`}
                     className={cx(
