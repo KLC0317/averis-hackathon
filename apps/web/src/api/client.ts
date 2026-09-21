@@ -297,10 +297,19 @@ function mapDetail(value: any): CaseDetail {
     siEvidence: item.si?.evidence?.[0] ? { document: "SI", locator: `line ${item.si.evidence[0].locator?.start_line ?? "?"}`, quote: item.si.evidence[0].quote } : undefined,
     blEvidence: item.bl?.evidence?.[0] ? { document: "BL", locator: `line ${item.bl.evidence[0].locator?.start_line ?? "?"}`, quote: item.bl.evidence[0].quote } : undefined
   }));
+  const mappedDocuments = documents.map((doc: any) => ({
+    id: doc.id,
+    name: doc.filename ?? "Source document",
+    version: doc.sha256?.slice(0, 8) ?? "current",
+    updated: doc.created_at ?? "Imported locally",
+    format: doc.format,
+    size: doc.size
+  }));
   return {
     ...summary,
     siDocument: { id: si?.id, name: si?.filename ?? "SI source", version: si?.sha256?.slice(0, 8) ?? "current", updated: si?.created_at ?? "Imported locally", format: si?.format, size: si?.size },
     blDocument: { id: bl?.id, name: bl?.filename ?? "Draft BL source", version: bl?.sha256?.slice(0, 8) ?? "current", updated: bl?.created_at ?? "Imported locally", format: bl?.format, size: bl?.size },
+    documents: mappedDocuments,
     fields,
     siSource: fields.flatMap((item: any) => item.siEvidence ? [item.siEvidence.quote] : []),
     blSource: fields.flatMap((item: any) => item.blEvidence ? [item.blEvidence.quote] : []),

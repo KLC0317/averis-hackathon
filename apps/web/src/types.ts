@@ -98,6 +98,7 @@ export interface CaseDetail extends CaseSummary {
   arbitration?: Arbitration | null;
   siDocument: DocumentReference;
   blDocument: DocumentReference;
+  documents?: DocumentReference[];
   fields: FieldFinding[];
   siSource: string[];
   blSource: string[];

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Check, CheckCircle2, Copy, Download, FileSearch, History,
-  Info, TriangleAlert, X
+  Info, LoaderCircle, RefreshCw, TriangleAlert, Upload, X
 } from "lucide-react";
 import { caseDetails as initialCaseDetails } from "../../../data/mockData";
 import type { CaseDetail, FindingStatus } from "../../../types";
@@ -37,6 +37,17 @@ export default function CaseDetailPage() {
   const [resolvingArbitration, setResolvingArbitration] = useState(false);
   const [arbitrationError, setArbitrationError] = useState<string | null>(null);
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [draftText, setDraftText] = useState<string | null>(null);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftVersion, setDraftVersion] = useState(1);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [previewing, setPreviewing] = useState<"si" | "bl" | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [selectedSiDocumentId, setSelectedSiDocumentId] = useState<string | undefined>();
+  const [selectedBlDocumentId, setSelectedBlDocumentId] = useState<string | undefined>();
 
   // Live data when the API is reachable; the fixture keeps the workspace
   // usable on a clean machine with nothing running. A failed fetch is silent
@@ -147,6 +158,89 @@ export default function CaseDetailPage() {
     toast("Source quotes and locators copied to clipboard");
   };
 
+  const handleRetry = () => {
+    setRetrying(true);
+    apiClient.retryCase(detail.id)
+      .then(async ({ runId }) => {
+        toast(`Retry started (${runId.slice(0, 12)}…)`, "success");
+        const updated = await apiClient.getCase(detail.id);
+        setDetail(updated);
+      })
+      .catch(() => toast("Retry unavailable · no live backend reachable; nothing was persisted", "warning"))
+      .finally(() => setRetrying(false));
+  };
+
+  const handleUpload = (file: File) => {
+    setUploading(true);
+    const roleHint = /si/i.test(file.name) ? "si" : /bl|bill/i.test(file.name) ? "bl" : undefined;
+    apiClient.uploadDocument(detail.id, file, roleHint, detail.caseVersion)
+      .then(async () => {
+        toast(`Uploaded ${file.name}; source is now available to pair`, "success");
+        const updated = await apiClient.getCase(detail.id);
+        setDetail(updated);
+      })
+      .catch((err) => toast(`Upload not persisted: ${err instanceof Error ? err.message : "API unavailable"}`, "warning"))
+      .finally(() => setUploading(false));
+  };
+
+  const handleCreateDraft = () => {
+    setDrafting(true);
+    apiClient.createDraft(detail.id, detail.unresolvedFields > 0 ? "information_request" : "correction_request", detail.runId)
+      .then((draft) => {
+        setDraftId(draft.id);
+        setDraftVersion(draft.version);
+        setDraftText(draft.text);
+        toast("Draft created locally in the API", "success");
+      })
+      .catch(() => {
+        setDraftId(null);
+        setDraftText(`Case ${detail.emailId}\n\nPlease review the outstanding finding and provide the source document or requested correction.`);
+        toast("API unavailable · draft shown locally and not persisted", "warning");
+      });
+  };
+
+  const handleSaveDraft = () => {
+    if (!draftText || !draftId) return;
+    setSavingDraft(true);
+    apiClient.updateDraft(draftId, draftText, draftVersion)
+      .then((draft) => {
+        setDraftVersion(draft.version);
+        toast("Draft saved to the API", "success");
+      })
+      .catch(() => toast("Draft save failed · changes remain only in this page", "warning"))
+      .finally(() => setSavingDraft(false));
+  };
+
+  const handlePreview = (side: "si" | "bl") => {
+    const document = side === "si" ? detail.siDocument : detail.blDocument;
+    if (!document.id) {
+      toast("Source preview unavailable for offline fixture documents", "warning");
+      return;
+    }
+    setPreviewing(side);
+    apiClient.getSourcePreview(document.id)
+      .then((preview) => setPreviewText(preview.blocks.map((block) => block.text).join("\n\n") || "No readable blocks returned."))
+      .catch(() => toast("Could not load source preview", "warning"))
+      .finally(() => setPreviewing(null));
+  };
+
+  const handleSelectPair = () => {
+    if (!selectedSiDocumentId && !selectedBlDocumentId) {
+      toast("Select at least one API document before saving a pair", "warning");
+      return;
+    }
+    apiClient.selectPair(detail.id, {
+      siDocumentId: selectedSiDocumentId,
+      blDocumentId: selectedBlDocumentId,
+      expectedCaseVersion: detail.caseVersion
+    })
+      .then(({ caseVersion }) => {
+        setDetail((prev) => ({ ...prev, caseVersion }));
+        toast("Document pair selection saved", "success");
+      })
+      .catch(() => toast("Pair selection failed · no live backend reachable", "warning"));
+  };
+
   return (
     <div className="content-wrap case-page">
       <div className="case-header-wrap">
@@ -186,6 +280,21 @@ export default function CaseDetailPage() {
           >
             Audit history
           </Button>
+          <Button variant="secondary" icon={<RefreshCw size={15} className={retrying ? "spin" : undefined} />} onClick={handleRetry} disabled={retrying}>
+            {retrying ? "Retrying…" : "Retry run"}
+          </Button>
+          <Button variant="secondary" icon={<FileSearch size={15} />} onClick={handleCreateDraft} disabled={drafting}>
+            {drafting ? "Draft ready" : "Create draft"}
+          </Button>
+          <label className="btn btn-secondary" style={{ cursor: uploading ? "wait" : "pointer" }}>
+            {uploading ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}
+            {uploading ? "Uploading…" : "Upload source"}
+            <input type="file" accept=".pdf,.txt,.docx,.xlsx" style={{ display: "none" }} disabled={uploading} onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) handleUpload(file);
+              event.currentTarget.value = "";
+            }} />
+          </label>
           <Button variant="primary" icon={<Download size={15} />} onClick={handleExportJson}>
             Export JSON
           </Button>
@@ -244,6 +353,43 @@ export default function CaseDetailPage() {
             }
           }}
         />
+      )}
+
+      <div className="card" style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div className="card-heading">
+          <div><span className="eyebrow">SOURCE CONTROLS</span><h3>Document pair and previews</h3></div>
+          <span className="mono" style={{ fontSize: "11px", color: "var(--ink-faint)" }}>case v{detail.caseVersion}</span>
+        </div>
+        {detail.documents && detail.documents.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+            <label style={{ fontSize: "12px", color: "var(--ink-muted)" }}>SI document
+              <select className="search-field" style={{ display: "block", width: "100%", marginTop: "5px" }} value={selectedSiDocumentId ?? detail.siDocument.id ?? ""} onChange={(event) => setSelectedSiDocumentId(event.target.value || undefined)}>
+                <option value="">Select SI document</option>
+                {detail.documents.map((document) => <option key={document.id ?? document.name} value={document.id}>{document.name} · {document.version}</option>)}
+              </select>
+            </label>
+            <label style={{ fontSize: "12px", color: "var(--ink-muted)" }}>BL document
+              <select className="search-field" style={{ display: "block", width: "100%", marginTop: "5px" }} value={selectedBlDocumentId ?? detail.blDocument.id ?? ""} onChange={(event) => setSelectedBlDocumentId(event.target.value || undefined)}>
+                <option value="">Select BL document</option>
+                {detail.documents.map((document) => <option key={document.id ?? document.name} value={document.id}>{document.name} · {document.version}</option>)}
+              </select>
+            </label>
+          </div>
+        ) : <p style={{ fontSize: "12px", color: "var(--ink-muted)" }}>Document IDs are not available in offline fixture mode. Upload a source after connecting to the API.</p>}
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <Button variant="secondary" onClick={handleSelectPair} disabled={!detail.documents?.length}>Save pair selection</Button>
+          <Button variant="ghost" onClick={() => handlePreview("si")} disabled={previewing !== null}>{previewing === "si" ? "Loading SI…" : "Preview SI"}</Button>
+          <Button variant="ghost" onClick={() => handlePreview("bl")} disabled={previewing !== null}>{previewing === "bl" ? "Loading BL…" : "Preview BL"}</Button>
+        </div>
+        {previewText && <pre style={{ maxHeight: "180px", overflow: "auto", margin: 0, padding: "12px", background: "var(--bg-subtle)", borderRadius: "var(--radius-md)", whiteSpace: "pre-wrap", fontSize: "11px", color: "var(--ink-secondary)" }}>{previewText}</pre>}
+      </div>
+
+      {draftText !== null && (
+        <div className="card" style={{ marginTop: "12px" }}>
+          <div className="card-heading"><div><span className="eyebrow">LOCAL DRAFT</span><h3>Review response</h3></div><span className="status-badge info">{draftId ? "API draft" : "Not persisted"}</span></div>
+          <textarea value={draftText} onChange={(event) => setDraftText(event.target.value)} style={{ width: "100%", minHeight: "120px", marginTop: "10px", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", padding: "10px", fontFamily: "inherit", fontSize: "12px", background: "var(--bg-surface)", color: "var(--ink-primary)" }} />
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}><Button variant="primary" onClick={handleSaveDraft} disabled={!draftId || savingDraft}>{savingDraft ? "Saving…" : `Save draft v${draftVersion}`}</Button></div>
+        </div>
       )}
 
       {/* Case Alert Banner */}
