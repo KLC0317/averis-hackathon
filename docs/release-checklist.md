@@ -1,6 +1,6 @@
 # Release checklist
 
-- [ ] README quick start works on a clean machine.
+- [x] README quick start works on a clean machine (rehearsed end-to-end in isolated clone `var/clean-rehearsal` with fresh DB, run, export, validate, report, and challenge).
 - [x] `python -m cleardraft doctor` reports required and optional dependencies.
 - [x] Import accounts for all 520 emails and 250 public attachments (`var/release.db` and doctor bundle check).
 - [x] TXT, native PDF, scanned PDF/OCR, DOCX, XLSX, corrupt, and missing source
@@ -11,7 +11,7 @@
       tests pass (`53 passed` in the local writable-temp run).
 - [x] Review, revision, retry, stale-action, and worker-restart paths pass end to end
       (`tests/test_release_slice.py::test_review_revision_retry_stale_action_worker_restart_end_to_end`).
-- [ ] Eight browser flows and empty/error states pass.
+- [x] Eight browser flows and empty/error states pass (verified interactively via browser subagent on Next.js/FastAPI with recorded session artifact).
 - [x] Export has exactly all known email IDs and validates against the strict
       organizer schema (520/520 in `artifacts/submission.json`).
 - [x] Evaluator answer key is absent from app image, mounts, prompts, and tests
