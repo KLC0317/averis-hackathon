@@ -299,7 +299,7 @@ def fetch_from_imap(
     try:
         mail.login(username, password)
         # Read-only EXAMINE to strictly protect mailbox integrity
-        mail.examine(folder)
+        mail.select(folder, readonly=True)
 
         # Search for messages
         res, data = mail.uid("SEARCH", None, f"UID {last_uid + 1}:*")
