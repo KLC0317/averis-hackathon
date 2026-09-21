@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +195,8 @@ def verify_case(docs: list[dict[str, Any]], email: dict[str, Any], category: str
 
 
 def run_import(store: Store, import_id: str, mode: str = "local_rules",
-               policy: GatewayPolicy | None = None) -> tuple[str, dict[str, VerificationResult]]:
+               policy: GatewayPolicy | None = None,
+               concurrency: int | None = None) -> tuple[str, dict[str, VerificationResult]]:
     if mode not in {"local_rules", "live_ai", "replay"}:
         raise ValueError("mode must be local_rules, live_ai, or replay")
     if mode == "replay":
@@ -212,17 +215,21 @@ def run_import(store: Store, import_id: str, mode: str = "local_rules",
     emails = store.list_emails(import_id)
     docs_all = store.list_documents(import_id)
     input_hash = hashlib.sha256("".join(x["content_hash"] for x in emails).encode()).hexdigest()
-    run_id = store.create_run(import_id, mode, input_hash, policy_version="local-rules-v1")
+    active_set = store.get_active_prompt_example_set() if hasattr(store, "get_active_prompt_example_set") else None
+    policy_version = f"local-rules-v1+{active_set['version']}" if active_set else "local-rules-v1"
+    run_id = store.create_run(import_id, mode, input_hash, policy_version=policy_version)
     cases = {x["email_id"]: x for x in store.list_cases(import_id)}
     results: dict[str, VerificationResult] = {}
     aggregate: dict[str, Any] = {}
-    for email_row in emails:
+
+    def _process_one(email_row: dict[str, Any]) -> tuple[str, str, dict[str, Any], VerificationResult, str]:
         email = email_row["raw"]
         subject, body = email.get("subject", ""), email.get("body", "")
         # Every message is read by the deterministic rules first; the gateway
         # decides whether that reading stands, needs a model second opinion, or
         # needs a person. Routing policy lives in gateway.py, not here.
         classification = classify_email(subject, body)
+        local_subtype = classification.get("request_subtype")
         classification["source"] = "local_rules"
         classification_issues: list[str] = []
         decision = route_local(classification, policy)
@@ -237,6 +244,7 @@ def run_import(store: Store, import_id: str, mode: str = "local_rules",
                 try:
                     resolved = provider.classify_email(
                         subject, body, attachment_count=len(email.get("attachments", [])), local_hint=hint,
+                        learned_examples=active_set.get("examples") if active_set else None,
                     )
                 except Exception as exc:
                     retryable = getattr(exc, "retryable", False)
@@ -256,11 +264,30 @@ def run_import(store: Store, import_id: str, mode: str = "local_rules",
         classification["gateway"] = decision.to_dict()
         category = classification["category"]
         docs = [d for d in docs_all if d.get("email_id") == email["email_id"]]
-        result = verify_case(docs, email, category, classification.get("request_subtype"), provider)
+        # Always use deterministic local evidence for the empty-attachment guard
+        # rather than model second opinion, preventing dropped-attachment false clears.
+        result = verify_case(docs, email, category, local_subtype, provider)
         result.issues.extend(classification_issues)
-        results[email["email_id"]] = result
         case = cases[email["email_id"]]
-        store.save_case_result(run_id, case["id"], category, classification, _result_json(result), result.verification)
-        aggregate[email["email_id"]] = result.to_submission()
+        return email["email_id"], category, classification, result, case["id"]
+
+    if concurrency is None:
+        concurrency = int(os.getenv("WORKER_CONCURRENCY", "8"))
+
+    if concurrency > 1:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {pool.submit(_process_one, row): row for row in emails}
+            for fut in as_completed(futures):
+                email_id, category, classification, result, case_id = fut.result()
+                results[email_id] = result
+                store.save_case_result(run_id, case_id, category, classification, _result_json(result), result.verification)
+                aggregate[email_id] = result.to_submission()
+    else:
+        for email_row in emails:
+            email_id, category, classification, result, case_id = _process_one(email_row)
+            results[email_id] = result
+            store.save_case_result(run_id, case_id, category, classification, _result_json(result), result.verification)
+            aggregate[email_id] = result.to_submission()
+
     store.complete_run(run_id, aggregate)
     return run_id, results

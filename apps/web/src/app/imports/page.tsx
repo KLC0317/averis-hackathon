@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import {
-  ArrowRight, Copy, Download, FileArchive, Play, ShieldCheck, Upload
+  ArrowRight, Copy, Download, FileArchive, Play, RefreshCw, ShieldCheck, Upload
 } from "lucide-react";
 import { imports as fixtureImports } from "../../data/mockData";
 import type { ImportRecord } from "../../types";
@@ -25,8 +25,9 @@ export default function ImportsPage() {
     apiClient
       .listImports()
       .then(async (rows) => {
+        const bundleRows = rows.filter((r) => r.name !== "mailbox" && (r as any).source_mode !== "mailbox");
         const withMetrics = await Promise.all(
-          rows.map(async (row) => {
+          bundleRows.map(async (row) => {
             try {
               const m = await apiClient.getMetrics(row.id);
               return { ...row, comparisons: m.comparisons, needsReview: m.needsReview + m.needsClassificationReview };
@@ -81,20 +82,32 @@ export default function ImportsPage() {
   return (
     <div className="content-wrap">
       <PageHeader
-        eyebrow="SETUP & PROVENANCE"
-        title="Imports"
+        title={
+          <span>
+            Document <span className="title-gradient-accent">Imports</span>
+          </span>
+        }
         description="Ingest participant bundles, inspect package manifests, and start deterministic comparison runs."
         actions={
-          <Button
-            variant="primary"
-            icon={<Upload size={16} />}
-            onClick={() => {
-              const input = document.getElementById("bundle-file-input") as HTMLInputElement;
-              input?.click();
-            }}
-          >
-            Import bundle
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              icon={<RefreshCw size={15} />}
+              onClick={refreshImports}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="primary"
+              icon={<Upload size={16} />}
+              onClick={() => {
+                const input = document.getElementById("bundle-file-input") as HTMLInputElement;
+                input?.click();
+              }}
+            >
+              Import bundle
+            </Button>
+          </>
         }
       />
 

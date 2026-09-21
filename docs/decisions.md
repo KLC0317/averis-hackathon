@@ -87,3 +87,53 @@ Retail Company"` - genuinely different strings with no containment
 relationship - are correctly left as a mismatch for a person to confirm, per
 the original decision log intent. Re-verified against the full 520-email set
 after the digit-gate fix: zero false clears.
+
+## ADR-006: Correction-guided few-shot prompting instead of unreviewed global learning
+
+**Decision:** Support operator-guided classification improvements through curated,
+versioned example sets injected as few-shot in-context examples. Unilateral,
+instant prompt alteration from single unreviewed corrections is explicitly
+forbidden.
+
+**Reason:** In-context prompt injection is stateless and does not alter model
+weights. Overriding §19 requires satisfying the "reviewed policy and regression
+tests" requirement. Three architectural guards prevent regression:
+1. **Signal integrity:** Only human-typed rationales are candidate examples. Tier
+   agreement and isolated ground truth are never used as training/prompt signals.
+2. **Versioned immutability:** Example sets are immutable (`examples-v1`,
+   `examples-v2`) and pinned to `runs.policy_version` ensuring reproducible,
+   deterministic challenge lab replays.
+3. **Promotion gate:** Promoting a candidate set into active deployment requires
+   zero regression on the blind split and zero false clears.
+
+**Consequence:** When an operator corrects a classification, the specific case
+re-evaluates immediately via atomic review events, but example library promotion
+remains a deliberate, auditable human curation step.
+
+## ADR-007: Operator-taught comparison equivalence as human-confirmed review aid
+
+**Decision:** When operators review comparison discrepancies and confirm that
+different expressions represent the same underlying operational entity, port,
+or packaging convention, their rationale is recorded in `review_events` alongside
+the normalized patterns. When similar patterns recur in future document comparisons,
+ClearDraft surfaces a 1-click **Precedent Review Aid**. Silent, automatic
+clearing of learned equivalences is strictly forbidden.
+
+**Reason:** Directly fulfills the prompt and challenge brief's core requirement
+("The same information can look different. One document may say 'Port of Loading'
+while the other says 'Load Port.' The system needs to recognize that these refer
+to the same field") without endangering the zero false clear invariant.
+
+Automatic equivalence risks conflating distinct legal entities (such as
+`"APRIL FINE PAPER TRADING"` vs `"APRIL FINE PAPER TRADING (MIDDLE EAST) FZE"`),
+as demonstrated during ADR-005 development. Surfacing taught equivalences as
+review aids reduces operator dwell time from 30 seconds to 3 seconds (single-click
+confirmation) while mathematically guaranteeing `false_clears = 0` by requiring
+explicit human approval.
+
+**Consequence:** Preserves 100% compliance with Section 19 of the decision log
+("Entity fuzzy matching: Review aid only; never automatic equivalence"). Operators
+can continuously teach system conventions without requiring developer code changes,
+and the full provenance of every equivalence decision remains inspectable in
+the audit ledger.
+

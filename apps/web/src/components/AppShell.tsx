@@ -1,16 +1,17 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity, BarChart2, CheckSquare, ChevronDown, ChevronRight, ClipboardCheck,
-  FileInput, FileSearch, HelpCircle, Inbox as InboxIcon, Layers, Moon,
-  MoreHorizontal, PanelLeftClose, PanelLeftOpen, Search, Settings, Sparkles,
+  BarChart2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck,
+  FileInput, FileSearch, Inbox as InboxIcon, Layers, ListTodo, Loader2, Mail, Menu, Moon,
+  Radio, Search, Settings, Sparkles,
   Sun, Type, X
 } from "lucide-react";
 import { useToast } from "./Toast";
 import { ClearDraftBrand, ClearDraftLogo } from "./ClearDraftLogo";
+import { apiClient, getCachedMetrics, setCachedMetrics, type Metrics } from "../api/client";
 
 const cx = (...values: Array<string | false | undefined | null>) => values.filter(Boolean).join(" ");
 
@@ -19,11 +20,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { toast } = useToast();
 
+  const isCasePage = pathname?.startsWith("/cases/");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [dark, setDark] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [orgOpen, setOrgOpen] = useState(false);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+
+  // Live genuine operations metrics for sidebar badges
+  useEffect(() => {
+    let cancelled = false;
+    const cached = getCachedMetrics();
+    if (cached) {
+      setMetrics(cached);
+    }
+    apiClient.getMetrics()
+      .then((m) => {
+        if (!cancelled && m) {
+          setMetrics(m);
+          setCachedMetrics(m);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const alertCount = metrics?.funnel?.needs_human ?? metrics?.needsReview ?? null;
+  const todoCount = metrics?.funnel?.operator_action ?? null;
 
   // Initialize theme from localStorage on client
   useEffect(() => {
@@ -50,7 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Keyboard shortcut for Cmd+K
+  // Keyboard shortcut for Cmd+K and Ctrl+B
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -63,6 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }
       if (e.key === "Escape") {
         setCmdOpen(false);
+        setSidebarOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -70,36 +96,116 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className={cx("app", dark && "dark")}>
-      {/* Precision Modern Sidebar (Matching Reference Design) */}
+    <div className={cx("app", dark && "dark", isCasePage && "app-case-mode")}>
+      {/* Mobile Sidebar Hamburger Trigger (visible on screens <= 768px) */}
+      {!isCasePage && (
+        <button
+          type="button"
+          className="mobile-sidebar-toggle-btn"
+          onClick={() => setSidebarOpen(true)}
+          title="Open Navigation"
+          aria-label="Open Navigation Menu"
+        >
+          <Menu size={18} />
+        </button>
+      )}
+
+      {isCasePage ? (
+        <header className="case-top-navbar">
+          <div className="case-top-navbar-left">
+            <Link href="/inbox" className="case-top-brand" aria-label="ClearDraft Home">
+              <ClearDraftBrand height={28} showText={true} />
+            </Link>
+          </div>
+
+          <div className="case-top-navbar-right">
+            <button
+              className="utility-btn"
+              onClick={toggleDark}
+              title={dark ? "Switch to light mode" : "Switch to dark mode"}
+              aria-label="Toggle theme"
+            >
+              {dark ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+
+            <div className="case-top-user-pill">
+              <span className="case-top-avatar">JD</span>
+              <span className="case-top-user-name">Jordan Diaz</span>
+              <ChevronDown size={13} className="case-top-user-chevron" />
+            </div>
+          </div>
+        </header>
+      ) : (
       <aside className={cx("sidebar", collapsed && "sidebar-collapsed", sidebarOpen && "sidebar-mobile-open")}>
+        {/* Subtle Edge Chevron Toggle */}
+        <button
+          type="button"
+          className="sidebar-edge-toggle"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setCollapsed(!collapsed);
+          }}
+          title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+        </button>
+
         <div className="sidebar-top-section">
-          {/* Header with Extracted Official Logo & Collapse Toggle */}
+          {/* Header with Extracted Official Logo & Chevron Collapse Toggle */}
           <div className="sidebar-header">
             {!collapsed ? (
               <>
-                <Link href="/inbox" className="brand" aria-label="ClearDraft Home">
+                <Link
+                  href="/inbox"
+                  className="brand"
+                  aria-label="ClearDraft Home"
+                  onClick={() => setSidebarOpen(false)}
+                >
                   <ClearDraftBrand height={34} showText={true} />
                 </Link>
-                <button
-                  type="button"
-                  className="sidebar-toggle-btn"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCollapsed(true);
-                  }}
-                  title="Collapse sidebar (Ctrl+B)"
-                  aria-label="Collapse sidebar"
-                >
-                  <PanelLeftClose size={17} />
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <button
+                    type="button"
+                    className="sidebar-chevron-btn"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCollapsed(true);
+                    }}
+                    title="Collapse sidebar (Ctrl+B)"
+                    aria-label="Collapse sidebar"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  {sidebarOpen && (
+                    <button
+                      type="button"
+                      className="sidebar-toggle-btn mobile-close-btn"
+                      onClick={() => setSidebarOpen(false)}
+                      title="Close drawer"
+                      aria-label="Close drawer"
+                    >
+                      <X size={17} />
+                    </button>
+                  )}
+                </div>
               </>
             ) : (
               <div className="sidebar-collapsed-header-wrap">
+                <Link
+                  href="/inbox"
+                  className="brand-collapsed-link"
+                  aria-label="ClearDraft Home"
+                  onClick={() => setSidebarOpen(false)}
+                  title="ClearDraft Home"
+                >
+                  <ClearDraftLogo size={28} />
+                </Link>
                 <button
                   type="button"
-                  className="sidebar-rail-header-btn"
+                  className="sidebar-chevron-btn collapsed"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -108,11 +214,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   title="Expand sidebar (Ctrl+B)"
                   aria-label="Expand sidebar"
                 >
-                  <ClearDraftLogo size={30} />
-                  <span className="rail-expand-pill">
-                    <PanelLeftOpen size={11} />
-                  </span>
-                  <span className="rail-tooltip">Expand Sidebar (Ctrl+B)</span>
+                  <ChevronRight size={15} />
                 </button>
               </div>
             )}
@@ -130,23 +232,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               href="/inbox"
               icon={<InboxIcon size={17} />}
               label="Dashboard"
-              badge="36"
+              badge={alertCount != null ? String(alertCount) : undefined}
               badgeTone="amber"
               collapsed={collapsed}
+              onNavigate={() => setSidebarOpen(false)}
             />
             <NavItem
-              href="/cases/case-1042"
+              href="/todo"
               icon={<CheckSquare size={17} />}
               label="To-do List"
-              badge="1"
+              badge={todoCount != null ? String(todoCount) : undefined}
               badgeTone="teal"
               collapsed={collapsed}
+              onNavigate={() => setSidebarOpen(false)}
             />
             <NavItem
               href="/imports"
               icon={<FileInput size={17} />}
               label="Imports"
               collapsed={collapsed}
+              onNavigate={() => setSidebarOpen(false)}
+            />
+            <NavItem
+              href="/live"
+              icon={<Radio size={17} />}
+              label="Live Mailbox"
+              badge="IMAP"
+              badgeTone="teal"
+              collapsed={collapsed}
+              onNavigate={() => setSidebarOpen(false)}
             />
 
             {/* Navigation Section 2: MY SPACES */}
@@ -159,190 +273,76 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
 
             <NavItem
-              href="/challenges"
-              icon={<Sparkles size={17} />}
-              label="Challenges"
-              collapsed={collapsed}
-            />
-            <NavItem
               href="/evaluation"
               icon={<BarChart2 size={17} />}
               label="Evaluation"
-              badge="98.6%"
-              badgeTone="purple"
               collapsed={collapsed}
+              onNavigate={() => setSidebarOpen(false)}
             />
             <NavItem
-              href="/typography"
-              icon={<Type size={17} />}
-              label="Typography"
-              badge="System"
-              badgeTone="teal"
+              href="/rl-audit"
+              icon={<Sparkles size={17} />}
+              label="RL Audit"
+              badge="RLHF"
+              badgeTone="purple"
               collapsed={collapsed}
+              onNavigate={() => setSidebarOpen(false)}
             />
-
-            {/* Workspace item with popup */}
-            <div style={{ position: "relative" }}>
-              <button
-                className={cx("nav-item", orgOpen && "active")}
-                onClick={() => setOrgOpen((v) => !v)}
-                title={collapsed ? "Workspace: Averis SDOC" : "Switch Workspace"}
-                style={{ width: "100%" }}
-              >
-                <span className="nav-icon"><Layers size={17} /></span>
-                {!collapsed ? (
-                  <>
-                    <span className="nav-label">Averis SDOC</span>
-                    <ChevronDown size={13} style={{ marginLeft: "auto", opacity: 0.6 }} />
-                  </>
-                ) : (
-                  <span className="rail-tooltip">Workspace: Averis SDOC</span>
-                )}
-              </button>
-
-              {orgOpen && (
-                <div
-                  className="card"
-                  style={{
-                    position: "absolute",
-                    bottom: "100%",
-                    left: 0,
-                    right: collapsed ? "auto" : 0,
-                    width: collapsed ? "220px" : "100%",
-                    zIndex: 60,
-                    padding: "8px",
-                    marginBottom: "6px",
-                    boxShadow: "var(--shadow-xl)"
-                  }}
-                >
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--ink-faint)", padding: "4px 8px", textTransform: "uppercase" }}>
-                    Select Workspace
-                  </div>
-                  {[
-                    { name: "Averis SDOC 2024", active: true, tag: "Primary" },
-                    { name: "Participant Fixtures", active: false, tag: "Mock" },
-                    { name: "Regression Suite", active: false, tag: "QA" }
-                  ].map((ws, i) => (
-                    <button
-                      key={i}
-                      className={cx("nav-item", ws.active && "active")}
-                      style={{ padding: "6px 8px", fontSize: "12px", width: "100%" }}
-                      onClick={() => {
-                        setOrgOpen(false);
-                        toast(`Switched workspace to: ${ws.name}`, "info");
-                      }}
-                    >
-                      <span style={{ fontWeight: ws.active ? 700 : 500 }}>{ws.name}</span>
-                      <span className="brand-badge" style={{ marginLeft: "auto" }}>{ws.tag}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             <NavItem
               href="/settings"
               icon={<Settings size={17} />}
               label="Settings"
               collapsed={collapsed}
+              onNavigate={() => setSidebarOpen(false)}
             />
           </nav>
         </div>
 
-        {/* Bottom Utility Row & Profile (matching reference image) */}
+        {/* Bottom Profile Row with Dark Mode Toggle directly beside profile */}
         <div className="sidebar-footer">
-          {/* 4-button circular utility action row */}
-          <div className={cx("sidebar-utility-row", collapsed && "utility-row-vertical")}>
-            <button
-              className="utility-btn"
-              onClick={() => toast("ClearDraft Documentation: docs.cleardraft.io", "info")}
-              title="Help & Guidelines"
-              aria-label="Help"
-            >
-              <HelpCircle size={16} />
-              {collapsed && <span className="rail-tooltip">Help & Docs</span>}
-            </button>
-
-            <button
-              className="utility-btn"
-              onClick={toggleDark}
-              title={dark ? "Switch to light mode" : "Switch to dark mode"}
-              aria-label="Toggle theme"
-            >
-              {dark ? <Sun size={16} /> : <Moon size={16} />}
-              {collapsed && <span className="rail-tooltip">{dark ? "Light Mode" : "Dark Mode"}</span>}
-            </button>
-
-            <button
-              className="utility-btn"
-              onClick={() => toast("Deterministic Engine: rules-v0.3 operational · 14ms latency", "success")}
-              title="Engine Diagnostics"
-              aria-label="Diagnostics"
-            >
-              <Activity size={16} />
-              {collapsed && <span className="rail-tooltip">Engine Diagnostics</span>}
-            </button>
-
+          <div className={cx("sidebar-user-row", collapsed && "user-row-collapsed")}>
             <button
               type="button"
-              className="utility-btn"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setCollapsed(!collapsed);
-              }}
-              title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
-              aria-label="Toggle collapse"
+              className="sidebar-user-profile-btn"
+              onClick={() => toast("Operator profile: Kian Lee · Role: Lead Verifier", "info")}
+              title="User Profile: Kian Lee"
+              aria-label="Operator Profile"
             >
-              {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-              {collapsed && <span className="rail-tooltip">Expand Sidebar (Ctrl+B)</span>}
-            </button>
-          </div>
-
-          <div className="sidebar-divider" />
-
-          {/* Operator Profile Card */}
-          <button
-            className={cx("sidebar-user-card", collapsed && "user-card-collapsed")}
-            onClick={() => toast("Operator profile: Kian Lee · Role: Lead Verifier", "info")}
-            title="User Profile"
-          >
-            <div className="avatar-ring-wrap">
-              <span className="avatar">KL</span>
-              <span className="avatar-online-dot" />
-            </div>
-            {!collapsed && (
-              <>
+              <div className="avatar-ring-wrap">
+                <span className="avatar">KL</span>
+                <span className="avatar-online-dot" />
+              </div>
+              {!collapsed && (
                 <div className="user-details">
                   <strong>Kian Lee</strong>
                   <span>Lead Operator</span>
                 </div>
-                <MoreHorizontal size={15} className="user-more" style={{ marginLeft: "auto", color: "var(--ink-faint)" }} />
-              </>
-            )}
-            {collapsed && <span className="rail-tooltip">Kian Lee (Lead)</span>}
-          </button>
+              )}
+              {collapsed && <span className="rail-tooltip">Kian Lee (Lead)</span>}
+            </button>
+
+            {/* Dark Mode Button directly beside the profile */}
+            <button
+              type="button"
+              className="sidebar-theme-btn"
+              onClick={toggleDark}
+              title={dark ? "Switch to light mode" : "Switch to dark mode"}
+              aria-label="Toggle theme"
+            >
+              {dark ? <Sun size={15} /> : <Moon size={15} />}
+              {collapsed && <span className="rail-tooltip">{dark ? "Light Mode" : "Dark Mode"}</span>}
+            </button>
+          </div>
         </div>
       </aside>
+      )}
 
-      {sidebarOpen && (
+      {sidebarOpen && !isCasePage && (
         <div className="modal-overlay mobile-only" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* Main Content Area without redundant topbar */}
-      <main className="main">
-        {collapsed && (
-          <button
-            type="button"
-            className="collapsed-main-expand-btn"
-            onClick={() => setCollapsed(false)}
-            title="Expand sidebar (Ctrl+B)"
-            aria-label="Expand sidebar"
-          >
-            <PanelLeftOpen size={15} />
-            <span>Expand Sidebar</span>
-          </button>
-        )}
+      <main className={cx("main", isCasePage && "main-case-view")}>
 
         {/* Command Palette Modal */}
         {cmdOpen && (
@@ -381,6 +381,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div
                   className="command-item"
                   onClick={() => {
+                    router.push("/todo");
+                    setCmdOpen(false);
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <CheckSquare size={16} />
+                    <span>To-do List (Operator Tasks)</span>
+                  </div>
+                  <span className="mono" style={{ fontSize: "11px" }}>/todo</span>
+                </div>
+                <div
+                  className="command-item"
+                  onClick={() => {
                     router.push("/cases/case-1042");
                     setCmdOpen(false);
                   }}
@@ -407,6 +420,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div
                   className="command-item"
                   onClick={() => {
+                    router.push("/live");
+                    setCmdOpen(false);
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <Radio size={16} />
+                    <span>Live Mailbox (Read-only IMAP Ingestion)</span>
+                  </div>
+                  <span className="mono" style={{ fontSize: "11px" }}>/live</span>
+                </div>
+                <div
+                  className="command-item"
+                  onClick={() => {
                     router.push("/challenges");
                     setCmdOpen(false);
                   }}
@@ -429,6 +455,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <span>Evaluation Report & Scores</span>
                   </div>
                   <span className="mono" style={{ fontSize: "11px" }}>/evaluation</span>
+                </div>
+                <div
+                  className="command-item"
+                  onClick={() => {
+                    router.push("/rl-audit");
+                    setCmdOpen(false);
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <Sparkles size={16} style={{ color: "#8b5cf6" }} />
+                    <span>RL Audit & Precedent Memory</span>
+                  </div>
+                  <span className="mono" style={{ fontSize: "11px" }}>/rl-audit</span>
                 </div>
                 <div
                   className="command-item"
@@ -463,7 +502,8 @@ function NavItem({
   label,
   badge,
   badgeTone = "amber",
-  collapsed
+  collapsed,
+  onNavigate
 }: {
   href: string;
   icon: React.ReactNode;
@@ -471,23 +511,53 @@ function NavItem({
   badge?: string;
   badgeTone?: "amber" | "teal" | "purple" | "neutral";
   collapsed?: boolean;
+  onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const isActive = pathname === href || (href !== "/inbox" && pathname.startsWith(href));
+  const [isPending, setIsPending] = useState(false);
+
+  useEffect(() => {
+    setIsPending(false);
+  }, [pathname]);
 
   return (
     <Link
       href={href}
-      className={cx("nav-item", isActive && "active")}
+      prefetch={true}
+      onMouseEnter={() => {
+        try {
+          router.prefetch(href);
+        } catch (_) {}
+      }}
+      onTouchStart={() => {
+        try {
+          router.prefetch(href);
+        } catch (_) {}
+      }}
+      onClick={() => {
+        if (pathname !== href) {
+          setIsPending(true);
+        }
+        onNavigate?.();
+      }}
+      className={cx(
+        "nav-item",
+        isActive && "active",
+        isPending && "nav-item-pending"
+      )}
     >
-      <span className="nav-icon">{icon}</span>
+      <span className="nav-icon">
+        {isPending ? <Loader2 size={16} className="nav-pending-spinner" /> : icon}
+      </span>
       {!collapsed ? (
         <>
           <span className="nav-label">{label}</span>
-          {badge && <span className={cx("nav-pill-badge", `badge-${badgeTone}`)}>{badge}</span>}
+          {badge && <span className={cx("nav-pill-badge", `badge-${badgeTone}`)} suppressHydrationWarning>{badge}</span>}
         </>
       ) : (
-        <span className="rail-tooltip">
+        <span className="rail-tooltip" suppressHydrationWarning>
           {label} {badge ? `(${badge})` : ""}
         </span>
       )}

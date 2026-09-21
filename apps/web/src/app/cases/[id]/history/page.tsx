@@ -136,7 +136,7 @@ export default function HistoryPage() {
           <button className="back-link" onClick={() => router.push(`/cases/${detail.id}`)}>
             <ArrowLeft size={14} /> Back to case workspace
           </button>
-          <h1 style={{ fontSize: "24px", fontWeight: 800 }}>Audit History</h1>
+          <h1 style={{ fontSize: "var(--text-page-title)", fontWeight: 700, letterSpacing: "-0.035em" }}>Audit <span className="title-gradient-accent">History</span></h1>
           <div style={{ display: "flex", gap: "10px", fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px" }}>
             <span className="mono" style={{ color: "var(--primary)", fontWeight: 600 }}>{detail.emailId}</span>
             <span>·</span>

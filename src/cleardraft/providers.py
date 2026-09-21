@@ -184,7 +184,8 @@ class DeepSeekProvider:
         return {"document_role": role, "fields": normalized_fields, "warnings": value.get("warnings", []) if isinstance(value.get("warnings", []), list) else []}
 
     def classify_email(self, subject: str, body: str, *, attachment_count: int | None = None,
-                       local_hint: dict[str, Any] | None = None) -> dict[str, Any]:
+                       local_hint: dict[str, Any] | None = None,
+                       learned_examples: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         from .contracts import validate_classification
         system = (
             "Classify the current sender's request into exactly one category: "
@@ -240,6 +241,19 @@ class DeepSeekProvider:
             "requires_review to true and list the others in alternative_categories; otherwise "
             "leave alternative_categories empty."
         )
+        if learned_examples:
+            examples_block = (
+                "\n\nOperator-confirmed classifications from this deployment, with the reason "
+                "each was corrected. Treat these as precedent, not as rules that override the "
+                "message in front of you:\n"
+            )
+            for ex in learned_examples[:8]:
+                subj = str(ex.get("subject", ""))[:80]
+                cat = ex.get("category") or ex.get("new_category", "")
+                rat = ex.get("rationale") or ex.get("reason", "")
+                excerpt = str(ex.get("body_excerpt", ""))[:150]
+                examples_block += f"- Example (Subject: {subj}): Category is {cat}. Rationale: {rat}. Excerpt: {excerpt}\n"
+            system += examples_block
         payload: dict[str, Any] = {"subject": subject, "body": body}
         if attachment_count is not None:
             payload["attachment_count"] = attachment_count

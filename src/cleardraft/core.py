@@ -303,11 +303,12 @@ _CATEGORY_SIGNALS: dict[str, tuple[tuple[str, float], ...]] = {
         (r"\b(?:amend(?:ment)?|correction|revise|revision)\b[^.\n]{0,30}\b(?:b/?ls?|bills?\s+of\s+lading|drafts?)\b", 2.5),
     ),
     "GENERAL": (
-        (r"\b(?:update|summary|report|notification|notice)\b", 1.5),
-        (r"\breminder\b", 2.0),
+        (r"(?:\b|_)(?:update|summary|report|notification|notice)(?:\b|_)", 1.5),
+        (r"(?:\b|_)reminder(?:\b|_)", 2.0),
         (r"\b(?:planning|schedule|forecast|timeline)\b", 1.5),
         (r"\b(?:meeting|call|discussion)\b", 1.5),
         (r"\bfy[ia]\b", 1.5),
+        (r"\b(?:holiday|greetings?|new\s+year|office\s+(?:closure|resumes)|wishing\s+everyone)\b", 4.5),
     ),
 }
 

@@ -2,7 +2,7 @@
 
 import React from "react";
 import {
-  AlertCircle, Check, CheckCircle2, CircleHelp, Clock3, Info, LoaderCircle,
+  AlertCircle, Archive, Check, CheckCircle2, CircleHelp, Clock3, Info, LoaderCircle,
   TriangleAlert, X, XCircle
 } from "lucide-react";
 import type { CaseSummary, FindingStatus } from "../types";
@@ -16,7 +16,7 @@ export function PageHeader({
   actions
 }: {
   eyebrow?: string;
-  title: string;
+  title: React.ReactNode;
   description?: string;
   actions?: React.ReactNode;
 }) {
@@ -39,7 +39,9 @@ export function Button({
   onClick,
   type = "button",
   disabled = false,
-  className
+  className,
+  style,
+  title
 }: {
   children: React.ReactNode;
   variant?: "primary" | "secondary" | "ghost" | "danger";
@@ -48,6 +50,8 @@ export function Button({
   type?: "button" | "submit";
   disabled?: boolean;
   className?: string;
+  style?: React.CSSProperties;
+  title?: string;
 }) {
   return (
     <button
@@ -55,6 +59,8 @@ export function Button({
       className={cx("btn", `btn-${variant}`, className)}
       onClick={onClick}
       disabled={disabled}
+      style={style}
+      title={title}
     >
       {icon}
       {children}
@@ -73,6 +79,9 @@ export function StatusBadge({
     NEEDS_REVIEW: { label: "Needs review", icon: <TriangleAlert size={12} />, cls: "warning" },
     MISSING: { label: "Missing", icon: <AlertCircle size={12} />, cls: "muted" },
     Complete: { label: "Complete", icon: <CheckCircle2 size={12} />, cls: "success" },
+    // Distinct from Complete on purpose: the discrepancy was real and still stands,
+    // the operator has actioned it. Neutral styling, not a green "verified match".
+    Closed: { label: "Closed by operator", icon: <Archive size={12} />, cls: "info" },
     "Needs review": { label: "Needs review", icon: <TriangleAlert size={12} />, cls: "warning" },
     "Needs classification review": { label: "Category unconfirmed", icon: <CircleHelp size={12} />, cls: "danger" },
     "Awaiting source": { label: "Awaiting source", icon: <Clock3 size={12} />, cls: "warning" },
@@ -108,7 +117,7 @@ export function MetricCard({
         <span>{label}</span>
         {icon && <span className="metric-icon-box">{icon}</span>}
       </div>
-      <strong className="tabular-nums">{value}</strong>
+      <strong className="tabular-nums" suppressHydrationWarning>{value}</strong>
       {hint && <span className="metric-hint">{hint}</span>}
     </div>
   );

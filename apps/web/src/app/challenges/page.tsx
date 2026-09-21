@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import {
-  Archive, Check, FileArchive, FileSearch, LoaderCircle, Mail, Play, Ruler,
+  Archive, Check, FileArchive, FileSearch, LoaderCircle, Mail, Play, RotateCcw, Ruler,
   ShieldAlert, Type, X
 } from "lucide-react";
 import { apiClient, type ChallengeResult } from "../../api/client";
@@ -103,25 +103,43 @@ export default function ChallengesPage() {
   return (
     <div className="content-wrap">
       <PageHeader
-        eyebrow="QUALITY & REGRESSION TESTING"
-        title="Challenges"
-        description="Run a real source-mutating challenge against a fixture already imported into the API, and compare the pipeline's result before and after the mutation. Each card below runs exactly the mutation logic in challenges.py - nothing here is simulated."
+        title={
+          <span>
+            Regression <span className="title-gradient-accent">Challenges</span>
+          </span>
+        }
+        description="Source-mutating regression suite testing semantic normalization, invariant stability, and classification resilience."
         actions={
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-            <span style={{ color: "var(--ink-muted)" }}>Fixture (email_id or case id)</span>
-            <input
-              value={fixtureId}
-              onChange={(e) => setFixtureId(e.target.value)}
-              className="mono"
-              style={{
-                border: "1px solid var(--border-default)",
-                borderRadius: 6,
-                padding: "6px 8px",
-                fontSize: 12,
-                width: 140
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 500, color: "var(--ink-secondary)" }}>
+              <span>Target fixture:</span>
+              <input
+                value={fixtureId}
+                onChange={(e) => setFixtureId(e.target.value)}
+                className="mono"
+                style={{
+                  border: "1px solid var(--border-default)",
+                  borderRadius: "8px",
+                  padding: "6px 10px",
+                  fontSize: "12.5px",
+                  width: "110px",
+                  background: "var(--bg-surface)",
+                  color: "var(--ink-primary)"
+                }}
+              />
+            </label>
+            <Button
+              variant="secondary"
+              icon={<RotateCcw size={14} />}
+              onClick={() => {
+                setResults({});
+                setOutcomes([]);
+                toast("Reset challenge outcomes", "info");
               }}
-            />
-          </label>
+            >
+              Reset
+            </Button>
+          </div>
         }
       />
 

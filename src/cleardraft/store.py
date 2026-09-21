@@ -7,6 +7,7 @@ remaining dependency-light for the hackathon's native setup.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -78,6 +79,7 @@ class Store:
               email_id TEXT NOT NULL, category TEXT, classification_json TEXT,
               processing TEXT NOT NULL DEFAULT 'QUEUED', verification TEXT NOT NULL DEFAULT 'NOT_STARTED',
               result_json TEXT, updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+              disposition TEXT, disposition_reason TEXT, disposition_at TEXT, disposition_by TEXT,
               UNIQUE(import_id, email_id)
             );
             CREATE TABLE IF NOT EXISTS runs (
@@ -114,6 +116,17 @@ class Store:
               id TEXT PRIMARY KEY, run_id TEXT NOT NULL, path TEXT NOT NULL,
               bytes_hash TEXT, machine_only INTEGER NOT NULL, created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS prompt_example_sets (
+              id TEXT PRIMARY KEY, version TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'draft',
+              examples_json TEXT NOT NULL DEFAULT '[]', source_event_ids_json TEXT NOT NULL DEFAULT '[]',
+              notes TEXT, created_by TEXT NOT NULL DEFAULT 'operator', created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mailbox_connections (
+              id TEXT PRIMARY KEY, label TEXT NOT NULL, provider TEXT NOT NULL,
+              host TEXT NOT NULL, port INTEGER NOT NULL, username TEXT NOT NULL,
+              folder TEXT NOT NULL DEFAULT 'INBOX', last_uid INTEGER DEFAULT 0,
+              last_polled_at TEXT, status TEXT NOT NULL DEFAULT 'configured', created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS jobs (
               id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}',
               result_json TEXT, status TEXT NOT NULL DEFAULT 'QUEUED', attempts INTEGER NOT NULL DEFAULT 0,
@@ -123,10 +136,28 @@ class Store:
             );
             CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, created_at);
             """)
+            # Seed default mailbox presets if empty
+            existing_conns = db.execute("SELECT COUNT(*) AS c FROM mailbox_connections").fetchone()
+            if existing_conns and int(existing_conns["c"]) == 0:
+                now_str = utc_now()
+                presets = [
+                    ("conn_gmail", "Demo Gmail (Docs Intake)", "gmail", "imap.gmail.com", 993, "cleardraft.intake@gmail.com", "INBOX", 0, None, "ready", now_str),
+                    ("conn_outlook", "Office 365 Shipping Mailbox", "outlook", "outlook.office365.com", 993, "shipping.verification@company.com", "INBOX", 0, None, "ready", now_str),
+                    ("conn_generic", "Averis Enterprise IMAP", "imap", "mail.averis-trade.internal", 993, "doc-ops@averis-trade.internal", "INBOX", 0, None, "ready", now_str)
+                ]
+                db.executemany(
+                    "INSERT INTO mailbox_connections(id, label, provider, host, port, username, folder, last_uid, last_polled_at, status, created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    presets
+                )
             # Keep databases created by an earlier resilience slice readable.
             columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)").fetchall()}
             if "result_json" not in columns:
                 db.execute("ALTER TABLE jobs ADD COLUMN result_json TEXT")
+            case_columns = {row["name"] for row in db.execute("PRAGMA table_info(cases)").fetchall()}
+            for column in ("disposition", "disposition_reason", "disposition_at", "disposition_by"):
+                if column not in case_columns:
+                    db.execute(f"ALTER TABLE cases ADD COLUMN {column} TEXT")
 
     def get_or_create_import(self, source_mode: str, manifest_hash: str, *,
                              issues: list[str] | None = None) -> tuple[str, bool]:
@@ -230,6 +261,92 @@ class Store:
                  json.dumps(evidence, ensure_ascii=False), expected_version, now),
             )
         return True, run_id, event_id
+
+    def close_case(self, case_id: str, *, expected_version: int, reason: str,
+                   actor: str = "reviewer") -> tuple[bool, str | None, str | None]:
+        """Mark a case operator-closed while leaving every finding intact.
+
+        This is the terminal state for a genuine, correctly-detected discrepancy:
+        the operator has actioned it outside the system and is closing the case.
+        It deliberately does not touch ``verification`` or any field result, so a
+        confirmed MISMATCH is never rewritten to MATCH in order to drain a queue.
+
+        Closing is refused unless every open field already carries a review event,
+        which stops an unexamined case from being closed in bulk. Returns
+        ``(applied, event_id, error_code)``.
+        """
+        event_id = str(uuid.uuid4())
+        now = utc_now()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                "SELECT version, result_json, disposition FROM cases WHERE id=?", (case_id,)
+            ).fetchone()
+            if not current:
+                return False, None, "case_not_found"
+            if int(current["version"]) != int(expected_version):
+                return False, None, "stale_case"
+            if current["disposition"] == "OPERATOR_CLOSED":
+                return False, None, "already_closed"
+            try:
+                result = json.loads(current["result_json"] or "{}")
+            except json.JSONDecodeError:
+                result = {}
+            open_fields = set(result.get("confirmed_mismatch_fields") or []) | set(
+                result.get("unresolved_fields") or [])
+            if open_fields:
+                reviewed = {
+                    row["field"] for row in db.execute(
+                        "SELECT DISTINCT field FROM review_events WHERE case_id=? AND field IS NOT NULL",
+                        (case_id,)).fetchall()
+                }
+                if open_fields - reviewed:
+                    return False, None, "unreviewed_fields"
+            updated = db.execute(
+                "UPDATE cases SET disposition='OPERATOR_CLOSED', disposition_reason=?, disposition_at=?, "
+                "disposition_by=?, updated_at=?, version=version+1 WHERE id=? AND version=?",
+                (reason, now, actor, now, case_id, expected_version),
+            )
+            if updated.rowcount != 1:
+                return False, None, "stale_case"
+            db.execute(
+                "INSERT INTO review_events(id,case_id,run_id,action,field,side,old_value,new_value,reason,"
+                "evidence_json,expected_version,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (event_id, case_id, None, "close_case", None, None, None, "OPERATOR_CLOSED",
+                 reason, "[]", expected_version, now),
+            )
+        return True, event_id, None
+
+    def reopen_case(self, case_id: str, *, expected_version: int, reason: str,
+                    actor: str = "reviewer") -> tuple[bool, str | None, str | None]:
+        """Return an operator-closed case to the active review queue."""
+        event_id = str(uuid.uuid4())
+        now = utc_now()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                "SELECT version, disposition FROM cases WHERE id=?", (case_id,)
+            ).fetchone()
+            if not current:
+                return False, None, "case_not_found"
+            if int(current["version"]) != int(expected_version):
+                return False, None, "stale_case"
+            if current["disposition"] != "OPERATOR_CLOSED":
+                return False, None, "not_closed"
+            updated = db.execute(
+                "UPDATE cases SET disposition=NULL, disposition_reason=NULL, disposition_at=NULL, "
+                "disposition_by=NULL, updated_at=?, version=version+1 WHERE id=? AND version=?",
+                (now, case_id, expected_version),
+            )
+            if updated.rowcount != 1:
+                return False, None, "stale_case"
+            db.execute(
+                "INSERT INTO review_events(id,case_id,run_id,action,field,side,old_value,new_value,reason,"
+                "evidence_json,expected_version,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (event_id, case_id, None, "reopen_case", None, None, "OPERATOR_CLOSED", None,
+                 f"{reason} [by: {actor}]", "[]", expected_version, now),
+            )
+        return True, event_id, None
 
     def add_email(self, import_id: str, email: dict[str, Any], content_hash: str) -> str:
         eid = str(uuid.uuid4())
@@ -393,6 +510,40 @@ class Store:
                 return None
             row = db.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
         return dict(row) if row else None
+
+    def list_drafts(self, case_id: str) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM drafts WHERE case_id=? ORDER BY created_at DESC", (case_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_review_metrics(self) -> dict[str, Any]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM review_events ORDER BY created_at").fetchall()
+        if not rows:
+            return {"count": 0, "avg_seconds": None}
+        durations = []
+        for r in rows:
+            ev = json.loads(r["evidence_json"] or "[]")
+            d = None
+            for item in ev:
+                if isinstance(item, dict) and "duration_seconds" in item:
+                    try:
+                        d = float(item["duration_seconds"])
+                        break
+                    except (ValueError, TypeError):
+                        pass
+            if d is None and r["reason"] and "time_to_resolve:" in r["reason"]:
+                m = re.search(r"time_to_resolve:\s*([\d.]+)s?", r["reason"])
+                if m:
+                    try:
+                        d = float(m.group(1))
+                    except ValueError:
+                        pass
+            if d is not None:
+                durations.append(d)
+        avg_d = round(sum(durations) / len(durations), 1) if durations else None
+        return {"count": len(rows), "measured_count": len(durations), "avg_seconds": avg_d}
+
 
     def save_case_result_if_version(self, run_id: str, case_id: str, category: str,
                                     classification: dict[str, Any], result: dict[str, Any],
@@ -623,3 +774,333 @@ class Store:
             else:
                 rows = db.execute("SELECT * FROM jobs ORDER BY created_at").fetchall()
         return [self._job_value(row) for row in rows]
+
+    # -------------------------------------------------------------------------
+    # Prompt Example Sets & Correction Candidates (Feature A)
+    # -------------------------------------------------------------------------
+    def list_correction_candidates(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            set_rows = db.execute("SELECT source_event_ids_json FROM prompt_example_sets").fetchall()
+            promoted_ids: set[str] = set()
+            for r in set_rows:
+                try:
+                    for eid in json.loads(r["source_event_ids_json"] or "[]"):
+                        promoted_ids.add(str(eid))
+                except Exception:
+                    pass
+
+            events = db.execute(
+                "SELECT r.*, c.email_id, c.import_id, e.raw_json "
+                "FROM review_events r "
+                "JOIN cases c ON r.case_id = c.id "
+                "LEFT JOIN emails e ON c.id = e.id "
+                "WHERE r.action IN ('classification_correction', 'resolve_classification') "
+                "ORDER BY r.created_at DESC"
+            ).fetchall()
+
+        candidates = []
+        for row in events:
+            ev_id = row["id"]
+            email_data = json.loads(row["raw_json"]) if row["raw_json"] else {}
+            body_text = email_data.get("body", "")
+            excerpt = body_text[:280] + ("…" if len(body_text) > 280 else "")
+            candidates.append({
+                "id": ev_id,
+                "case_id": row["case_id"],
+                "email_id": row["email_id"],
+                "import_id": row["import_id"],
+                "subject": email_data.get("subject", "No Subject"),
+                "sender": email_data.get("from", ""),
+                "body_excerpt": excerpt,
+                "old_category": row["old_value"],
+                "new_category": row["new_value"],
+                "rationale": row["reason"] or "",
+                "created_at": row["created_at"],
+                "is_promoted": ev_id in promoted_ids,
+            })
+        return candidates
+
+    def list_prompt_example_sets(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM prompt_example_sets ORDER BY created_at DESC").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["examples"] = json.loads(d.pop("examples_json") or "[]")
+            d["source_event_ids"] = json.loads(d.pop("source_event_ids_json") or "[]")
+            result.append(d)
+        return result
+
+    def get_active_prompt_example_set(self) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM prompt_example_sets WHERE status = 'active' ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["examples"] = json.loads(d.pop("examples_json") or "[]")
+        d["source_event_ids"] = json.loads(d.pop("source_event_ids_json") or "[]")
+        return d
+
+    def create_prompt_example_set(
+        self,
+        version: str,
+        examples: list[dict[str, Any]],
+        source_event_ids: list[str],
+        notes: str | None = None,
+        created_by: str = "operator",
+        status: str = "active"
+    ) -> dict[str, Any]:
+        set_id = str(uuid.uuid4())
+        now = utc_now()
+        with self.connect() as db:
+            if status == "active":
+                db.execute("UPDATE prompt_example_sets SET status = 'retired' WHERE status = 'active'")
+            db.execute(
+                "INSERT INTO prompt_example_sets(id, version, status, examples_json, source_event_ids_json, notes, created_by, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (set_id, version, status, json.dumps(examples, ensure_ascii=False), json.dumps(source_event_ids), notes, created_by, now)
+            )
+        return {
+            "id": set_id,
+            "version": version,
+            "status": status,
+            "examples": examples,
+            "source_event_ids": source_event_ids,
+            "notes": notes,
+            "created_by": created_by,
+            "created_at": now
+        }
+
+    # -------------------------------------------------------------------------
+    # Mailbox Connections (Feature B)
+    # -------------------------------------------------------------------------
+    def list_mailbox_connections(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM mailbox_connections ORDER BY created_at ASC").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_mailbox_connection(self, conn_id: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM mailbox_connections WHERE id = ?", (conn_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_mailbox_connection(
+        self,
+        conn_id: str,
+        label: str,
+        provider: str,
+        host: str,
+        port: int,
+        username: str,
+        folder: str = "INBOX"
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO mailbox_connections(id, label, provider, host, port, username, folder, status, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET label=excluded.label, provider=excluded.provider, host=excluded.host, port=excluded.port, username=excluded.username, folder=excluded.folder",
+                (conn_id, label, provider, host, port, username, folder, "ready", now)
+            )
+        return self.get_mailbox_connection(conn_id) or {}
+
+    def update_mailbox_cursor(
+        self,
+        conn_id: str,
+        last_uid: int,
+        status: str = "connected",
+        last_polled_at: str | None = None
+    ) -> None:
+        now = last_polled_at or utc_now()
+        with self.connect() as db:
+            db.execute(
+                "UPDATE mailbox_connections SET last_uid=?, status=?, last_polled_at=? WHERE id=?",
+                (last_uid, status, now, conn_id)
+            )
+
+    # -------------------------------------------------------------------------
+    # Taught Equivalence & Comparison Precedents (Feature A - Revised Scope)
+    # -------------------------------------------------------------------------
+    def find_field_precedent(self, field: str, si_val: str | None, bl_val: str | None) -> dict[str, Any] | None:
+        """Finds a prior operator-taught equivalence that generalizes to this pair.
+
+        Only ``confirm_equivalence`` events are eligible - a reviewer explicitly
+        taught two values are the same entity, as distinct from an OCR fix
+        (``correct_reading``) or an unreadable-source flag (``cannot_read``),
+        neither of which asserts anything about equivalence.
+
+        Matching runs the current and stored values through the same
+        ``normalize_field`` pipeline used at comparison time, so a taught fix
+        generalizes along the rule the normalizer already encodes (e.g. a
+        party-name suffix truncation) rather than only ever matching the exact
+        strings originally taught. Raw substring matching is a fallback tier,
+        confined to free-text fields with a minimum length so short numeric
+        tokens (container counts, weights) can't cross-match unrelated values.
+
+        Strictly a suggestion for a human to confirm; this never mutates a case.
+        """
+        from .core import normalize_field
+
+        s_si = str(si_val or "").strip().lower()
+        s_bl = str(bl_val or "").strip().lower()
+        if not s_si and not s_bl:
+            return None
+
+        current_si_canon = (normalize_field(field, si_val)[0] or "").strip().lower() if si_val else ""
+        current_bl_canon = (normalize_field(field, bl_val)[0] or "").strip().lower() if bl_val else ""
+        # Numeric/coded fields normalize to a small alphabet where short strings
+        # collide by chance; only exact or normalized matches are trusted there.
+        is_free_text = field not in {"container_count", "gross_weight_kg"}
+        min_substring_len = 4
+
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT id, case_id, action, field, old_value, new_value, reason, created_at "
+                "FROM review_events "
+                "WHERE field = ? AND action = 'confirm_equivalence' "
+                "AND reason IS NOT NULL AND length(trim(reason)) > 0 "
+                "ORDER BY created_at DESC",
+                (field,)
+            ).fetchall()
+
+        for r in rows:
+            ev_old = str(r["old_value"] or "").strip().lower()
+            ev_new = str(r["new_value"] or "").strip().lower()
+            if not ev_old and not ev_new:
+                continue
+            ev_old_canon = (normalize_field(field, r["old_value"])[0] or "").strip().lower() if r["old_value"] else ""
+            ev_new_canon = (normalize_field(field, r["new_value"])[0] or "").strip().lower() if r["new_value"] else ""
+
+            # Bidirectional exact match on the raw taught values.
+            exact = (
+                (s_si and ev_old and s_si == ev_old and s_bl and ev_new and s_bl == ev_new)
+                or (s_si and ev_new and s_si == ev_new and s_bl and ev_old and s_bl == ev_old)
+            )
+
+            # Bidirectional match after normalization: the current pair is a
+            # different raw string but reduces to the same canonical value the
+            # operator already confirmed equivalent - this is the generalization
+            # step, not a literal replay of the taught strings.
+            normalized = False
+            if not exact and current_si_canon and current_bl_canon and ev_old_canon and ev_new_canon:
+                normalized = (
+                    (current_si_canon == ev_old_canon and current_bl_canon == ev_new_canon)
+                    or (current_si_canon == ev_new_canon and current_bl_canon == ev_old_canon)
+                )
+
+            # Substring / token pattern match, free-text fields only, with a
+            # minimum length floor so single digits or short codes can't match.
+            sub_match = False
+            if not exact and not normalized and is_free_text:
+                def _long_enough(a: str, b: str) -> bool:
+                    return len(a) >= min_substring_len and len(b) >= min_substring_len
+
+                if ev_old and ev_new:
+                    if _long_enough(ev_old, s_si) and (ev_old in s_si or s_si in ev_old) \
+                            and _long_enough(ev_new, s_bl) and (ev_new in s_bl or s_bl in ev_new):
+                        sub_match = True
+                    elif _long_enough(ev_new, s_si) and (ev_new in s_si or s_si in ev_new) \
+                            and _long_enough(ev_old, s_bl) and (ev_old in s_bl or s_bl in ev_old):
+                        sub_match = True
+                elif ev_old and not ev_new and _long_enough(ev_old, s_si or s_bl):
+                    if ev_old in s_si or ev_old in s_bl:
+                        sub_match = True
+
+            if exact or normalized or sub_match:
+                clean_rationale = re.sub(r"\s*\[time_to_resolve:.*?\]", "", r["reason"] or "").strip()
+                match_basis = "exact" if exact else ("normalized" if normalized else "substring")
+                return {
+                    "event_id": r["id"],
+                    "case_id": r["case_id"],
+                    "field": field,
+                    "si_pattern": r["old_value"],
+                    "bl_pattern": r["new_value"],
+                    "rationale": clean_rationale,
+                    "action": r["action"],
+                    "confidence": "HIGH" if (exact or normalized) else "SUGGESTED",
+                    "match_basis": match_basis,
+                    "created_at": r["created_at"]
+                }
+        return None
+
+    def get_case_precedents(self, case_id: str) -> dict[str, Any]:
+        """Scans discrepancy fields on a case and returns any taught precedents as review aids."""
+        case = self.get_case(case_id)
+        if not case:
+            return {}
+        result = case.get("result") or {}
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except Exception:
+                result = {}
+        fields = result.get("fields") or []
+        precedents: dict[str, Any] = {}
+        for f in fields:
+            if isinstance(f, dict):
+                st = f.get("state") or f.get("status")
+                if st in {"MISMATCH", "UNRESOLVED", "AMBIGUOUS", "NEEDS_REVIEW"}:
+                    f_name = f.get("field")
+                    si_val = f.get("si_value") or (f.get("si") or {}).get("raw_value") or (f.get("si") or {}).get("canonical_value")
+                    bl_val = f.get("bl_value") or (f.get("bl") or {}).get("raw_value") or (f.get("bl") or {}).get("canonical_value")
+                    prec = self.find_field_precedent(f_name, si_val, bl_val)
+                    if prec:
+                        precedents[f_name] = prec
+        return precedents
+
+    def list_all_review_events(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Returns chronological review events across all cases with case and email metadata."""
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT r.id, r.case_id, r.run_id, r.action, r.field, r.side, r.old_value, r.new_value, "
+                "       r.reason, r.evidence_json, r.expected_version, r.created_at, "
+                "       c.email_id, c.category as case_category, e.raw_json "
+                "FROM review_events r "
+                "LEFT JOIN cases c ON r.case_id = c.id "
+                "LEFT JOIN emails e ON c.id = e.id "
+                "ORDER BY r.created_at DESC "
+                "LIMIT ?",
+                (limit,)
+            ).fetchall()
+        out = []
+        for r in rows:
+            val = dict(r)
+            raw = val.pop("raw_json", None)
+            email_data = json.loads(raw) if raw else {}
+            val["subject"] = email_data.get("subject", "No Subject")
+            val["sender"] = email_data.get("from", "")
+            val["evidence"] = json.loads(val.pop("evidence_json", "[]") or "[]")
+            out.append(val)
+        return out
+
+    def list_all_precedents(self) -> list[dict[str, Any]]:
+        """Returns all distinct taught equivalence conventions recorded by operators."""
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT r.id, r.case_id, r.action, r.field, r.old_value, r.new_value, r.reason, r.created_at, "
+                "       c.email_id, e.raw_json "
+                "FROM review_events r "
+                "LEFT JOIN cases c ON r.case_id = c.id "
+                "LEFT JOIN emails e ON c.id = e.id "
+                "WHERE r.action = 'confirm_equivalence' AND r.reason IS NOT NULL AND length(trim(r.reason)) > 0 "
+                "ORDER BY r.created_at DESC"
+            ).fetchall()
+        out = []
+        seen = set()
+        for r in rows:
+            key = (r["field"], str(r["old_value"] or "").strip().lower(), str(r["new_value"] or "").strip().lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            val = dict(r)
+            raw = val.pop("raw_json", None)
+            email_data = json.loads(raw) if raw else {}
+            val["subject"] = email_data.get("subject", "No Subject")
+            clean_rationale = re.sub(r"\s*\[time_to_resolve:.*?\]", "", val["reason"] or "").strip()
+            val["clean_rationale"] = clean_rationale
+            out.append(val)
+        return out
+
+

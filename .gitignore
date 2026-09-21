@@ -27,6 +27,8 @@ var/
 artifacts/
 *.sqlite3
 *.db
+scratch/
+brain/
 
 # Evaluator distribution is never an application input or release artifact
 infra/evaluator/

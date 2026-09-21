@@ -107,7 +107,9 @@ def validate_archive(path: str | Path) -> None:
         if total > MAX_TOTAL_BYTES: raise ValueError("archive exceeds uncompressed import limit")
 
 
-def open_source(source: str | Path) -> ParticipantSource:
+def open_source(source: Any) -> Any:
+    if hasattr(source, "emails") and hasattr(source, "read"):
+        return source
     path = Path(source)
     if path.is_file() and path.suffix.casefold() == ".zip":
         validate_archive(path)
@@ -115,8 +117,8 @@ def open_source(source: str | Path) -> ParticipantSource:
     return ParticipantSource(root=path)
 
 
-def import_participant(source: str | Path, store: Store) -> str:
-    """Import a directory or ZIP and persist immutable raw email/doc bytes."""
+def import_participant(source: Any, store: Store, source_type: str = "directory") -> str:
+    """Import a directory, ZIP, or live source and persist immutable raw email/doc bytes."""
     src = open_source(source)
     with src:
         emails = list(src.emails())
@@ -146,7 +148,7 @@ def import_participant(source: str | Path, store: Store) -> str:
         for eid, rel, _, data in docs:
             manifest.update(eid.encode()); manifest.update(rel.encode()); manifest.update(hashlib.sha256(data).digest())
         import_id, created = store.get_or_create_import(
-            "zip" if src.zip_path else "directory", manifest.hexdigest(), issues=issues
+            "zip" if getattr(src, "zip_path", None) else source_type, manifest.hexdigest(), issues=issues
         )
         if not created:
             return import_id

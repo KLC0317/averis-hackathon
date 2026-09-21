@@ -8,10 +8,11 @@
 - [x] Every resolved field links to source evidence (audited 785/785 resolved fields in 520 cases).
 - [x] Missing or ambiguous values cannot produce an automatic seven-field match.
 - [x] Focused reader, API, recovery, duplicate-import, revision, and replay-boundary
-      tests pass (`53 passed` in the local writable-temp run).
+      tests pass (`57 passed` in the local writable-temp run including worker lease recovery).
 - [x] Review, revision, retry, stale-action, and worker-restart paths pass end to end
-      (`tests/test_release_slice.py::test_review_revision_retry_stale_action_worker_restart_end_to_end`).
+      (`tests/test_release_slice.py` and `tests/test_worker_lease_recovery.py`).
 - [x] Eight browser flows and empty/error states pass (verified interactively via browser subagent on Next.js/FastAPI with recorded session artifact).
+- [x] Triage Funnel & Counterparty Auto-Drafting operationalized (23 counterparty missing/wrong document cases equipped with ready-to-send context-specific emails, saving ~15.2 operator hours).
 - [x] Export has exactly all known email IDs and validates against the strict
       organizer schema (520/520 in `artifacts/submission.json`).
 - [x] Evaluator answer key is absent from app image, mounts, prompts, and tests

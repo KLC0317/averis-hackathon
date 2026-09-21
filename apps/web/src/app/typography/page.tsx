@@ -19,9 +19,12 @@ export default function TypographyShowcasePage() {
   return (
     <div className="content-wrap" style={{ maxWidth: "1280px", margin: "0 auto" }}>
       <PageHeader
-        eyebrow="DESIGN SYSTEM · SPECIFICATION"
-        title="Typography & Document Review System"
-        description="Deterministic typographic architecture for shipping-document verification. Communicates clarity, precision, and trust with tabular numerals, WCAG AA contrast, and responsive scale targets."
+        title={
+          <span>
+            Typography & <span className="title-gradient-accent">Design System</span>
+          </span>
+        }
+        description="Deterministic typographic architecture for shipping-document verification, tabular numerals, and responsive scale targets."
         actions={
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <Button
