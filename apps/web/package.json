@@ -1,0 +1,23 @@
+{
+  "name": "cleardraft-web",
+  "private": true,
+  "version": "0.2.0",
+  "scripts": {
+    "dev": "next dev -p 5173",
+    "build": "next build",
+    "start": "next start -p 5173",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "lucide-react": "^1.47.0",
+    "next": "^15.2.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,71 @@
+name: cleardraft
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      STORAGE_ROOT: /var/lib/cleardraft/storage
+      DATABASE_URL: sqlite:////var/lib/cleardraft/cleardraft.db
+      CLEARDRAFT_DB: /var/lib/cleardraft/cleardraft.db
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - cleardraft-data:/var/lib/cleardraft
+      - ./sdoc-hackathon-bundle:/inputs/participant:ro
+    command: ["uvicorn", "cleardraft.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    env_file: .env
+    environment:
+      STORAGE_ROOT: /var/lib/cleardraft/storage
+      DATABASE_URL: sqlite:////var/lib/cleardraft/cleardraft.db
+      CLEARDRAFT_DB: /var/lib/cleardraft/cleardraft.db
+    volumes:
+      - cleardraft-data:/var/lib/cleardraft
+      - ./sdoc-hackathon-bundle:/inputs/participant:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "-m", "cleardraft_worker"]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      VITE_API_BASE_URL: /api
+      VITE_API_URL: /api/v1
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # The organizer evaluator is intentionally opt-in. It is never mounted in
+  # the application services above. Start it separately only when scoring.
+  organizer:
+    profiles: ["organizer"]
+    build:
+      context: ./sdoc-hackathon-docker/server
+    ports:
+      - "8080:8000"
+    volumes:
+      - ./sdoc-hackathon-docker/data_v2:/data:ro
+      - ./sdoc-hackathon-docker/data_v2/ground_truth.json:/secrets/ground_truth.json:ro
+    environment:
+      DATA_DIR: /data
+      GROUND_TRUTH: /secrets/ground_truth.json
+
+volumes:
+  cleardraft-data:

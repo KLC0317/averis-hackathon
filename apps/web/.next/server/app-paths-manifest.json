@@ -1,0 +1,12 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/cases/[id]/history/page": "app/cases/[id]/history/page.js",
+  "/cases/[id]/page": "app/cases/[id]/page.js",
+  "/challenges/page": "app/challenges/page.js",
+  "/imports/page": "app/imports/page.js",
+  "/evaluation/page": "app/evaluation/page.js",
+  "/page": "app/page.js",
+  "/inbox/page": "app/inbox/page.js",
+  "/typography/page": "app/typography/page.js",
+  "/settings/page": "app/settings/page.js"
+}

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+
+# Local configuration and runtime artifacts
+.env
+.env.*
+!.env.example
+var/
+artifacts/
+*.sqlite3
+*.db
+
+# Evaluator distribution is never an application input or release artifact
+infra/evaluator/
+sdoc-hackathon-docker/data_v2/ground_truth.json
+**/ground_truth.json
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

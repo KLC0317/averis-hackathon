@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+var
+artifacts
+node_modules
+dist
+__pycache__
+.pytest_cache
+sdoc-hackathon-bundle
+sdoc-hackathon-docker
+sdoc-hackathon-docker/data_v2/ground_truth.json
+**/ground_truth.json

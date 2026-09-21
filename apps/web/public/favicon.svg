@@ -1,0 +1,55 @@
+<svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="shieldGrad" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#2563eb" />
+      <stop offset="50%" stopColor="#1e3a8a" />
+      <stop offset="100%" stopColor="#0f172a" />
+    </linearGradient>
+    <linearGradient id="shieldBorder" x1="6" y1="4" x2="38" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.8" />
+      <stop offset="100%" stopColor="#1d4ed8" stopOpacity="0.4" />
+    </linearGradient>
+    <linearGradient id="docGlass" x1="14" y1="8" x2="36" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#ffffff" stopOpacity="0.4" />
+      <stop offset="100%" stopColor="#93c5fd" stopOpacity="0.15" />
+    </linearGradient>
+    <linearGradient id="checkGlow" x1="10" y1="26" x2="38" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#38bdf8" />
+      <stop offset="50%" stopColor="#60a5fa" />
+      <stop offset="100%" stopColor="#818cf8" />
+    </linearGradient>
+  </defs>
+  <path
+    d="M24 5L39 10.5V23.5C39 32.8 32.6 41.2 24 43.5C15.4 41.2 9 32.8 9 23.5V10.5L24 5Z"
+    fill="url(#shieldGrad)"
+    stroke="url(#shieldBorder)"
+    strokeWidth="1.5"
+  />
+  <path
+    d="M16 11C16 9.89543 16.8954 9 18 9H29L35 15V33C35 34.1046 34.1046 35 33 35H18C16.8954 35 16 34.1046 16 33V11Z"
+    fill="url(#docGlass)"
+    stroke="#93c5fd"
+    strokeWidth="1"
+  />
+  <path
+    d="M29 9V14C29 14.5523 29.4477 15 30 15H35"
+    stroke="#93c5fd"
+    strokeWidth="1"
+    fill="#ffffff"
+    fillOpacity="0.25"
+  />
+  <path
+    d="M13 25.5L21.5 33L37 16.5"
+    stroke="url(#checkGlow)"
+    strokeWidth="3.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />
+  <path
+    d="M13 25.5L21.5 33L37 16.5"
+    stroke="#ffffff"
+    strokeWidth="1.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />
+</svg>

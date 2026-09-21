@@ -1,0 +1,75 @@
+{
+  "package": "ClearDraft AI coding-agent handoff",
+  "version": "1.0",
+  "date": "2026-09-20",
+  "type": "Implementation specification; not a built application",
+  "tickets": 42,
+  "acceptance_scenarios": 77,
+  "files": [
+    {
+      "path": "ACCEPTANCE_TESTS.json",
+      "bytes": 31084,
+      "sha256": "795c26b2e4760e37db05fe42b90c462b5b6e57758711f828f61ec3b26f8fe76e"
+    },
+    {
+      "path": "AGENT_PROMPT.md",
+      "bytes": 7542,
+      "sha256": "5a945cd27906b34d1402bedc3340ba9f7c3d464edd1458323deea3bce038705b"
+    },
+    {
+      "path": "BACKLOG.json",
+      "bytes": 27890,
+      "sha256": "a8fcfb5d7a30fd7f241980366a68f541e1eaa90fc4e38a3f7c9a67c9b05bf2ad"
+    },
+    {
+      "path": "BUSINESS_AND_DEMO.md",
+      "bytes": 9332,
+      "sha256": "12794a3f8bc259df7f1fb49e623725dc5bfebc87ff075888720f30a00f3ae28f"
+    },
+    {
+      "path": "CLASSIFICATION_SCHEMA.json",
+      "bytes": 1918,
+      "sha256": "cee6be2cdbde095b6242b408bdaeb05249c895294b180355406370beb041efc4"
+    },
+    {
+      "path": "DATASET_AUDIT.json",
+      "bytes": 2599,
+      "sha256": "3d5d198583f9936ec5a098c7836f2606519e01cc21adca0f06c57e98ad8b05a8"
+    },
+    {
+      "path": "EXTRACTION_SCHEMA.json",
+      "bytes": 5806,
+      "sha256": "e67e06703ff3f28c2dfbabf75eeeda6e61d3e45d9a040f555c3a4abbfb87e07f"
+    },
+    {
+      "path": "IMPLEMENTATION_PLAN.md",
+      "bytes": 65125,
+      "sha256": "97a5f6304ef07fd653d0386990b6102a82b0027b89d216a6ad37892d30eba268"
+    },
+    {
+      "path": "PROMPT_CONTRACTS.md",
+      "bytes": 10466,
+      "sha256": "bf8b01008c9597b279cd991dadabc2f466bb01553c97c552f1817ea4103c1d31"
+    },
+    {
+      "path": "START_HERE.md",
+      "bytes": 3358,
+      "sha256": "7344710e36490ca91d92b2908e182b96cfa6d2108a010a0488e39614a44f6e86"
+    },
+    {
+      "path": "SUBMISSION_SCHEMA.json",
+      "bytes": 3605,
+      "sha256": "b8a06a2e5cf13c8163b4a1dd736ac9df6a680fb1de585884b56f8a1c29350698"
+    }
+  ],
+  "self_hash_excluded": true,
+  "validation": [
+    "All JSON files parsed",
+    "Backlog dependencies acyclic",
+    "Every acceptance scenario linked to an implementation ticket",
+    "Markdown code fences balanced",
+    "Source archives audited without reading evaluator answer-key contents"
+  ],
+  "application_tests_executed": false,
+  "original_input_archives_included": false
+}

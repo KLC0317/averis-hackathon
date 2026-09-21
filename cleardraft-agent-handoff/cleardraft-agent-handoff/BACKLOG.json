@@ -1,0 +1,1003 @@
+{
+  "schema_version": "1.0",
+  "project": "ClearDraft",
+  "status": "Implementation specification; all tickets initially unstarted",
+  "priority_policy": {
+    "P0": "Foundational correctness required for release",
+    "P1": "Required product differentiation and complete hackathon delivery",
+    "P2": "Optional extension after all P0/P1 release gates"
+  },
+  "execution_policy": "Choose dependency-ready work; phase is a grouping, dependencies determine actual order. Record code paths and validation evidence before marking done.",
+  "tickets": [
+    {
+      "id": "T01",
+      "phase": 0,
+      "priority": "P0",
+      "title": "Create project and environment doctor",
+      "depends_on": [],
+      "deliverables": [
+        "pyproject.toml",
+        "apps/web/package.json",
+        "scripts/doctor",
+        "docs/decisions/"
+      ],
+      "implementation_notes": "Resolve compatible versions, lock dependencies, confirm Python/Node/OCR/Docker/provider availability, and establish the CLI module.",
+      "acceptance_tests": [
+        "AC-058",
+        "AC-060",
+        "AC-067"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T02",
+      "phase": 0,
+      "priority": "P0",
+      "title": "Implement safe participant import",
+      "depends_on": [
+        "T01"
+      ],
+      "deliverables": [
+        "packages/core/importer.py",
+        "scripts/import_data",
+        "tests/import/"
+      ],
+      "implementation_notes": "Validate ZIP/directory inputs, confine paths, hash sources, retain malformed-record and missing-file issues, and deduplicate manifests.",
+      "acceptance_tests": [
+        "AC-001",
+        "AC-002",
+        "AC-003",
+        "AC-004",
+        "AC-072"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T03",
+      "phase": 0,
+      "priority": "P0",
+      "title": "Isolate organizer evaluator",
+      "depends_on": [
+        "T01"
+      ],
+      "deliverables": [
+        "infra/evaluator/README.md",
+        ".dockerignore",
+        ".gitignore",
+        "tests/evaluator_boundary/"
+      ],
+      "implementation_notes": "Prepare evaluator outside app context, restrict app mounts, keep truth reveal off, and verify canary isolation without reading answers.",
+      "acceptance_tests": [
+        "AC-005",
+        "AC-006",
+        "AC-067"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T04",
+      "phase": 1,
+      "priority": "P0",
+      "title": "Implement domain schemas and persistence",
+      "depends_on": [
+        "T01"
+      ],
+      "deliverables": [
+        "contracts/",
+        "apps/api/models/",
+        "apps/api/migrations/"
+      ],
+      "implementation_notes": "Define immutable documents, pairs, runs, observations, field results, reviews, jobs, drafts, challenges, and exports with constraints.",
+      "acceptance_tests": [
+        "AC-007",
+        "AC-071",
+        "AC-075"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T05",
+      "phase": 1,
+      "priority": "P0",
+      "title": "Implement persisted worker jobs",
+      "depends_on": [
+        "T04"
+      ],
+      "deliverables": [
+        "apps/worker/",
+        "packages/core/jobs.py"
+      ],
+      "implementation_notes": "Add atomic claiming, lease/heartbeat, cancellation, bounded retries, short DB transactions, stage checkpoints, and idempotency.",
+      "acceptance_tests": [
+        "AC-008",
+        "AC-059",
+        "AC-066",
+        "AC-073",
+        "AC-077"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T06",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Build source evidence abstraction and TXT reader",
+      "depends_on": [
+        "T02",
+        "T04"
+      ],
+      "deliverables": [
+        "packages/readers/base.py",
+        "packages/readers/text.py",
+        "packages/core/evidence.py"
+      ],
+      "implementation_notes": "Return source blocks with immutable document IDs, line offsets, hashes, parser version, and multiline-label context.",
+      "acceptance_tests": [
+        "AC-009",
+        "AC-016",
+        "AC-017"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T07",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Build native PDF extraction and preview",
+      "depends_on": [
+        "T06"
+      ],
+      "deliverables": [
+        "packages/readers/pdf.py",
+        "apps/api/document_preview.py"
+      ],
+      "implementation_notes": "Extract page/word/table context and render bounded previews; retain page dimensions and rotation for true source highlighting.",
+      "acceptance_tests": [
+        "AC-010",
+        "AC-012",
+        "AC-072"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T08",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Build OCR recovery adapter",
+      "depends_on": [
+        "T07"
+      ],
+      "deliverables": [
+        "packages/readers/ocr.py",
+        "tests/fixtures/scans/"
+      ],
+      "implementation_notes": "Detect insufficient native text, OCR necessary pages, cache by bytes/settings, retain OCR geometry/method, and surface missing language/runtime support.",
+      "acceptance_tests": [
+        "AC-011",
+        "AC-012",
+        "AC-055",
+        "AC-060"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T09",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Build DOCX reader",
+      "depends_on": [
+        "T06"
+      ],
+      "deliverables": [
+        "packages/readers/docx.py",
+        "tests/fixtures/docx/"
+      ],
+      "implementation_notes": "Extract paragraphs/tables/headers with order and locators; handle bilingual labels and disclose unsupported shapes.",
+      "acceptance_tests": [
+        "AC-013",
+        "AC-016"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T10",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Build XLSX reader",
+      "depends_on": [
+        "T06"
+      ],
+      "deliverables": [
+        "packages/readers/xlsx.py",
+        "tests/fixtures/xlsx/"
+      ],
+      "implementation_notes": "Preserve sheets/cells/merged ranges/formulas/cached values, distinguish numeric formats, and avoid invented calculations.",
+      "acceptance_tests": [
+        "AC-014",
+        "AC-015",
+        "AC-027",
+        "AC-028"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T11",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Implement provider interfaces and modes",
+      "depends_on": [
+        "T04",
+        "T06"
+      ],
+      "deliverables": [
+        "packages/providers/",
+        "contracts/provider/"
+      ],
+      "implementation_notes": "Add local rules, configurable live AI, structured-output validation, usage tracking, bounded retry, and hash-checked recorded replay.",
+      "acceptance_tests": [
+        "AC-058",
+        "AC-059",
+        "AC-057",
+        "AC-067",
+        "AC-076"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T12",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Implement evidence-backed email classification",
+      "depends_on": [
+        "T11"
+      ],
+      "deliverables": [
+        "packages/core/classify.py",
+        "contracts/classification.schema.json"
+      ],
+      "implementation_notes": "Classify current-request intent, preserve quoted thread context, record ambiguity, and route non-comparison categories correctly.",
+      "acceptance_tests": [
+        "AC-018",
+        "AC-019",
+        "AC-020",
+        "AC-056"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T13",
+      "phase": 2,
+      "priority": "P0",
+      "title": "Implement content-based document roles and pairing",
+      "depends_on": [
+        "T07",
+        "T09",
+        "T10",
+        "T11"
+      ],
+      "deliverables": [
+        "packages/core/pairing.py"
+      ],
+      "implementation_notes": "Identify actual document type, treat filenames as hints, and require explicit selection for ambiguous version sets.",
+      "acceptance_tests": [
+        "AC-021",
+        "AC-022",
+        "AC-075"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T14",
+      "phase": 3,
+      "priority": "P0",
+      "title": "Implement independent field extraction",
+      "depends_on": [
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T13"
+      ],
+      "deliverables": [
+        "packages/core/extract.py",
+        "contracts/extraction.schema.json",
+        "prompts/"
+      ],
+      "implementation_notes": "Read each document independently, validate required keys/evidence, preserve candidates and absence, and support bounded targeted reread.",
+      "acceptance_tests": [
+        "AC-016",
+        "AC-017",
+        "AC-023",
+        "AC-071",
+        "AC-076"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T15",
+      "phase": 3,
+      "priority": "P0",
+      "title": "Implement party and port normalization",
+      "depends_on": [
+        "T14"
+      ],
+      "deliverables": [
+        "packages/core/normalize/entities.py",
+        "packages/core/normalize/ports.py",
+        "config/label_synonyms.json"
+      ],
+      "implementation_notes": "Normalize harmless text only, keep meaningful identity and port context, and resolve same-document references with dependency tracking.",
+      "acceptance_tests": [
+        "AC-024",
+        "AC-029",
+        "AC-030",
+        "AC-031",
+        "AC-032"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T16",
+      "phase": 3,
+      "priority": "P0",
+      "title": "Implement container and weight normalization",
+      "depends_on": [
+        "T14"
+      ],
+      "deliverables": [
+        "packages/core/normalize/numeric.py"
+      ],
+      "implementation_notes": "Use exact Decimal, explicit units, container quantity rules, missing-value detection, and ambiguity-aware formatting.",
+      "acceptance_tests": [
+        "AC-025",
+        "AC-026",
+        "AC-027",
+        "AC-028",
+        "AC-032"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T17",
+      "phase": 3,
+      "priority": "P0",
+      "title": "Implement comparison and case policy",
+      "depends_on": [
+        "T15",
+        "T16",
+        "T12"
+      ],
+      "deliverables": [
+        "packages/core/compare.py",
+        "packages/core/policy.py"
+      ],
+      "implementation_notes": "Compute three-way field results, preserve mixed outcomes, distinguish processing from verification, and require seven supported matches to clear.",
+      "acceptance_tests": [
+        "AC-007",
+        "AC-033",
+        "AC-034",
+        "AC-035",
+        "AC-036",
+        "AC-048"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T18",
+      "phase": 4,
+      "priority": "P0",
+      "title": "Expose typed API and CLI",
+      "depends_on": [
+        "T02",
+        "T05",
+        "T17"
+      ],
+      "deliverables": [
+        "apps/api/routes/",
+        "src/cleardraft/__main__.py",
+        "apps/web/src/api/"
+      ],
+      "implementation_notes": "Implement documented routes/commands, pagination, typed errors, version guards, run progress, and safe ID-based source access.",
+      "acceptance_tests": [
+        "AC-001",
+        "AC-007",
+        "AC-050",
+        "AC-067"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T19",
+      "phase": 4,
+      "priority": "P1",
+      "title": "Build application shell and setup/import view",
+      "depends_on": [
+        "T18"
+      ],
+      "deliverables": [
+        "apps/web/src/layout/",
+        "apps/web/src/pages/imports/",
+        "apps/web/src/pages/settings/"
+      ],
+      "implementation_notes": "Add real mode/readiness indicators, upload/run controls, accessible navigation, and no-data/failure states.",
+      "acceptance_tests": [
+        "AC-058",
+        "AC-060",
+        "AC-062"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T20",
+      "phase": 4,
+      "priority": "P1",
+      "title": "Build categorized inbox and exception queue",
+      "depends_on": [
+        "T19"
+      ],
+      "deliverables": [
+        "apps/web/src/pages/inbox/"
+      ],
+      "implementation_notes": "Render category/outcome/unresolved counts and next action; keep count filters reconciled and classified-only separate from verified.",
+      "acceptance_tests": [
+        "AC-061",
+        "AC-062",
+        "AC-074"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T21",
+      "phase": 4,
+      "priority": "P1",
+      "title": "Build comparison and source-evidence workspace",
+      "depends_on": [
+        "T19",
+        "T17"
+      ],
+      "deliverables": [
+        "apps/web/src/pages/case/",
+        "apps/web/src/components/source-viewers/"
+      ],
+      "implementation_notes": "Show seven field rows, raw/normalized values, SI/BL passages, geometry/cell navigation, and simultaneous mismatch/unresolved findings.",
+      "acceptance_tests": [
+        "AC-037",
+        "AC-062"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T22",
+      "phase": 4,
+      "priority": "P1",
+      "title": "Implement review transactions and dependency recomputation",
+      "depends_on": [
+        "T17",
+        "T18"
+      ],
+      "deliverables": [
+        "packages/core/review.py",
+        "apps/api/routes/reviews.py"
+      ],
+      "implementation_notes": "Version every review action, retain original machine output, resolve only source-supported readings, and recompute derived field dependencies.",
+      "acceptance_tests": [
+        "AC-038",
+        "AC-039",
+        "AC-040",
+        "AC-041",
+        "AC-042"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T23",
+      "phase": 4,
+      "priority": "P1",
+      "title": "Build targeted-review interface",
+      "depends_on": [
+        "T21",
+        "T22"
+      ],
+      "deliverables": [
+        "apps/web/src/components/review-task/"
+      ],
+      "implementation_notes": "Display one actionable question with source context; distinguish uncertain reading, missing source, category, and pair selection.",
+      "acceptance_tests": [
+        "AC-038",
+        "AC-040",
+        "AC-041",
+        "AC-062"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T24",
+      "phase": 4,
+      "priority": "P1",
+      "title": "Implement editable correction and information drafts",
+      "depends_on": [
+        "T22",
+        "T23"
+      ],
+      "deliverables": [
+        "packages/core/drafts.py",
+        "apps/web/src/components/draft-editor/"
+      ],
+      "implementation_notes": "Generate from validated findings, allow copy/download/edit, mark stale after result changes, and provide no outbound sending behavior.",
+      "acceptance_tests": [
+        "AC-045"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T25",
+      "phase": 5,
+      "priority": "P1",
+      "title": "Implement immutable revisions and outcome diffs",
+      "depends_on": [
+        "T22"
+      ],
+      "deliverables": [
+        "packages/core/revisions.py",
+        "apps/api/routes/documents.py"
+      ],
+      "implementation_notes": "Create new pairs for new source bytes, recompare all fields, preserve history, and detect resolved/persistent/new issues.",
+      "acceptance_tests": [
+        "AC-043",
+        "AC-044",
+        "AC-077"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T26",
+      "phase": 5,
+      "priority": "P1",
+      "title": "Build revision history and recovery UI",
+      "depends_on": [
+        "T21",
+        "T25",
+        "T05"
+      ],
+      "deliverables": [
+        "apps/web/src/pages/history/",
+        "apps/web/src/components/recovery/"
+      ],
+      "implementation_notes": "Upload/select versions, show source and result diffs, reject stale state, and expose appropriate retry/replacement actions.",
+      "acceptance_tests": [
+        "AC-041",
+        "AC-043",
+        "AC-044",
+        "AC-066",
+        "AC-073"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T27",
+      "phase": 3,
+      "priority": "P0",
+      "title": "Implement strict submission and full-report exports",
+      "depends_on": [
+        "T17",
+        "T04"
+      ],
+      "deliverables": [
+        "packages/evaluation/export.py",
+        "contracts/submission.schema.json"
+      ],
+      "implementation_notes": "Freeze exact result selection, validate IDs and cross-field conditions, preserve rich findings in a companion report, and block unrepresentable incomplete exports.",
+      "acceptance_tests": [
+        "AC-006",
+        "AC-035",
+        "AC-046",
+        "AC-047",
+        "AC-048",
+        "AC-050"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T28",
+      "phase": 6,
+      "priority": "P0",
+      "title": "Connect aggregate organizer scoring",
+      "depends_on": [
+        "T03",
+        "T27"
+      ],
+      "deliverables": [
+        "packages/evaluation/organizer.py",
+        "docs/benchmark_notes.md"
+      ],
+      "implementation_notes": "Call configured evaluator, store actual response with export hash/version, and report known convention differences without changing operational results.",
+      "acceptance_tests": [
+        "AC-048",
+        "AC-049"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T29",
+      "phase": 6,
+      "priority": "P1",
+      "title": "Create source-reviewed fixture manifest and split",
+      "depends_on": [
+        "T06",
+        "T07",
+        "T09",
+        "T10"
+      ],
+      "deliverables": [
+        "tests/fixtures/manifest.json",
+        "packages/evaluation/splits.py"
+      ],
+      "implementation_notes": "Review a diverse source subset without evaluator truth, retain label rationales/disputes, and group originals/duplicates/variants before tuning.",
+      "acceptance_tests": [
+        "AC-051",
+        "AC-052"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T30",
+      "phase": 6,
+      "priority": "P1",
+      "title": "Implement fair baseline and evaluation runner",
+      "depends_on": [
+        "T17",
+        "T29"
+      ],
+      "deliverables": [
+        "packages/evaluation/baseline.py",
+        "packages/evaluation/runner.py"
+      ],
+      "implementation_notes": "Use comparable inputs/providers, freeze machine outcomes, compute quality/coverage metrics with explicit denominators, and record budget differences.",
+      "acceptance_tests": [
+        "AC-051",
+        "AC-063",
+        "AC-065",
+        "AC-070"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T31",
+      "phase": 6,
+      "priority": "P1",
+      "title": "Implement source-mutating challenge engine",
+      "depends_on": [
+        "T17",
+        "T29"
+      ],
+      "deliverables": [
+        "packages/evaluation/mutations.py",
+        "packages/evaluation/challenges.py"
+      ],
+      "implementation_notes": "Generate actual changed copies under preconditions, store source diff/expected effect/seed, isolate variants, and execute the real pipeline.",
+      "acceptance_tests": [
+        "AC-052",
+        "AC-053",
+        "AC-055",
+        "AC-056",
+        "AC-057",
+        "AC-074"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T32",
+      "phase": 6,
+      "priority": "P1",
+      "title": "Build interactive challenge lab",
+      "depends_on": [
+        "T19",
+        "T31"
+      ],
+      "deliverables": [
+        "apps/web/src/pages/challenges/"
+      ],
+      "implementation_notes": "Show before/after source, selectable supported mutations, expected behavior, actual outcomes, and honest failures with evidence.",
+      "acceptance_tests": [
+        "AC-054",
+        "AC-055",
+        "AC-074"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T33",
+      "phase": 6,
+      "priority": "P1",
+      "title": "Implement technical metrics and evaluation view",
+      "depends_on": [
+        "T28",
+        "T30",
+        "T32"
+      ],
+      "deliverables": [
+        "packages/evaluation/metrics.py",
+        "apps/web/src/pages/evaluation/"
+      ],
+      "implementation_notes": "Show measured quality, coverage, failure/review breakdowns, usage/cost provenance, and separate live/replay/machine/assisted modes.",
+      "acceptance_tests": [
+        "AC-063",
+        "AC-065",
+        "AC-070"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T34",
+      "phase": 6,
+      "priority": "P1",
+      "title": "Instrument human-review effort and trial protocol",
+      "depends_on": [
+        "T23",
+        "T30"
+      ],
+      "deliverables": [
+        "packages/evaluation/study.py",
+        "docs/reviewer-study.md"
+      ],
+      "implementation_notes": "Record active sessions/events with idle/visibility handling, provide balanced case assignments, and label savings pending when no people complete the trial.",
+      "acceptance_tests": [
+        "AC-064",
+        "AC-065"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T35",
+      "phase": 5,
+      "priority": "P0",
+      "title": "Complete resilience and input-control checks",
+      "depends_on": [
+        "T18",
+        "T22",
+        "T25"
+      ],
+      "deliverables": [
+        "tests/integration/recovery/",
+        "tests/security/"
+      ],
+      "implementation_notes": "Exercise timeouts, cancellation, stale reviews, archive limits, secret handling, worker restarts, and cache/version boundaries.",
+      "acceptance_tests": [
+        "AC-002",
+        "AC-008",
+        "AC-041",
+        "AC-057",
+        "AC-059",
+        "AC-060",
+        "AC-067",
+        "AC-072",
+        "AC-073",
+        "AC-077"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T36",
+      "phase": 7,
+      "priority": "P1",
+      "title": "Run all user-flow browser tests and polish",
+      "depends_on": [
+        "T20",
+        "T23",
+        "T24",
+        "T26",
+        "T32",
+        "T33"
+      ],
+      "deliverables": [
+        "apps/web/tests/e2e/",
+        "artifacts/ui-screenshots/"
+      ],
+      "implementation_notes": "Verify eight flows on desktop/mobile with real backend state, fix evidence/layout/accessibility issues, and capture working-app screenshots.",
+      "acceptance_tests": [
+        "AC-037",
+        "AC-038",
+        "AC-040",
+        "AC-043",
+        "AC-045",
+        "AC-054",
+        "AC-061",
+        "AC-062",
+        "AC-069"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T37",
+      "phase": 7,
+      "priority": "P0",
+      "title": "Package persistent Docker and native startup",
+      "depends_on": [
+        "T18",
+        "T19",
+        "T35"
+      ],
+      "deliverables": [
+        "compose.yml",
+        "Dockerfile",
+        "README.md",
+        ".env.example"
+      ],
+      "implementation_notes": "Provide app and optional evaluator profiles, local origin and loopback defaults, persistence, dependency checks, and explicit safe reset instructions.",
+      "acceptance_tests": [
+        "AC-005",
+        "AC-058",
+        "AC-066",
+        "AC-068"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T38",
+      "phase": 7,
+      "priority": "P1",
+      "title": "Run complete dataset and final evaluations",
+      "depends_on": [
+        "T27",
+        "T28",
+        "T30",
+        "T31",
+        "T33",
+        "T35"
+      ],
+      "deliverables": [
+        "artifacts/submission.json",
+        "artifacts/run-report.json",
+        "artifacts/evaluation.json",
+        "artifacts/test-report/"
+      ],
+      "implementation_notes": "Process all original emails, freeze machine output, validate export, collect actual organizer/baseline/challenge results, and document limitations.",
+      "acceptance_tests": [
+        "AC-001",
+        "AC-046",
+        "AC-047",
+        "AC-048",
+        "AC-049",
+        "AC-051",
+        "AC-065",
+        "AC-070"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T39",
+      "phase": 7,
+      "priority": "P1",
+      "title": "Prepare business evidence and presentation",
+      "depends_on": [
+        "T34",
+        "T36",
+        "T38"
+      ],
+      "deliverables": [
+        "docs/business-case.md",
+        "docs/demo-script.md",
+        "docs/project-overview.md",
+        "docs/known_limitations.md"
+      ],
+      "implementation_notes": "Report observed results only, label pending human trial, explain value mechanism, document synthetic examples, and rehearse the four-minute demo.",
+      "acceptance_tests": [
+        "AC-064",
+        "AC-068",
+        "AC-069",
+        "AC-070"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T40",
+      "phase": 7,
+      "priority": "P1",
+      "title": "Perform clean-machine release rehearsal",
+      "depends_on": [
+        "T36",
+        "T37",
+        "T38",
+        "T39"
+      ],
+      "deliverables": [
+        "docs/release-checklist.md",
+        "artifacts/release-manifest.json"
+      ],
+      "implementation_notes": "Follow README from scratch, run no-key and configured-live paths as available, verify all required deliverables, and record exact commands and outcomes.",
+      "acceptance_tests": [
+        "AC-058",
+        "AC-066",
+        "AC-068",
+        "AC-069"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T41",
+      "phase": 8,
+      "priority": "P2",
+      "title": "Extend structured-document challenge mutations",
+      "depends_on": [
+        "T31",
+        "T40"
+      ],
+      "deliverables": [
+        "packages/evaluation/mutations_docx.py",
+        "packages/evaluation/mutations_xlsx.py"
+      ],
+      "implementation_notes": "After release gates, add actual DOCX/XLSX cell/text changes with provenance and exact mutation preconditions.",
+      "acceptance_tests": [
+        "AC-053",
+        "AC-054",
+        "AC-074"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    },
+    {
+      "id": "T42",
+      "phase": 8,
+      "priority": "P2",
+      "title": "Add optional vision-assisted reread",
+      "depends_on": [
+        "T08",
+        "T11",
+        "T40"
+      ],
+      "deliverables": [
+        "packages/providers/vision.py",
+        "docs/vision-evaluation.md"
+      ],
+      "implementation_notes": "Only if provider support exists, compare targeted vision reread against OCR on held-out sources; preserve evidence gates and cost reporting.",
+      "acceptance_tests": [
+        "AC-011",
+        "AC-017",
+        "AC-055",
+        "AC-065"
+      ],
+      "status": "not_started",
+      "completion_evidence": []
+    }
+  ]
+}

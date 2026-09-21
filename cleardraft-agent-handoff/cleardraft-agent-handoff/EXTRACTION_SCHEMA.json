@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Independent seven-field document extraction",
+  "description": "Model-facing raw observations. Canonical values and final comparison outcomes are computed outside the model. Evidence IDs and quotes require application-side validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_role",
+    "fields",
+    "warnings"
+  ],
+  "properties": {
+    "document_role": {
+      "enum": [
+        "SI",
+        "DRAFT_BL"
+      ]
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shipper",
+        "consignee",
+        "notify_party",
+        "port_of_loading",
+        "port_of_discharge",
+        "container_count",
+        "gross_weight_kg"
+      ],
+      "properties": {
+        "shipper": {
+          "$ref": "#/$defs/observation"
+        },
+        "consignee": {
+          "$ref": "#/$defs/observation"
+        },
+        "notify_party": {
+          "$ref": "#/$defs/observation"
+        },
+        "port_of_loading": {
+          "$ref": "#/$defs/observation"
+        },
+        "port_of_discharge": {
+          "$ref": "#/$defs/observation"
+        },
+        "container_count": {
+          "$ref": "#/$defs/observation"
+        },
+        "gross_weight_kg": {
+          "$ref": "#/$defs/observation"
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 600
+      }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value_status",
+        "raw_value",
+        "unit_hint",
+        "reference_field",
+        "evidence",
+        "candidates",
+        "reason"
+      ],
+      "properties": {
+        "value_status": {
+          "enum": [
+            "PRESENT",
+            "MISSING",
+            "AMBIGUOUS",
+            "UNREADABLE"
+          ]
+        },
+        "raw_value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference_field": {
+          "enum": [
+            null,
+            "same_document_consignee"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "block_id",
+              "quote"
+            ],
+            "properties": {
+              "block_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "raw_value",
+              "unit_hint",
+              "evidence"
+            ],
+            "properties": {
+              "raw_value": {
+                "type": "string",
+                "minLength": 1
+              },
+              "unit_hint": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "evidence": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "block_id",
+                    "quote"
+                  ],
+                  "properties": {
+                    "block_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "quote": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "value_status": {
+                "const": "PRESENT"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "raw_value": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence": {
+                "minItems": 1
+              },
+              "candidates": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "value_status": {
+                "enum": [
+                  "MISSING",
+                  "UNREADABLE"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "raw_value": {
+                "type": "null"
+              },
+              "unit_hint": {
+                "type": "null"
+              },
+              "reference_field": {
+                "type": "null"
+              },
+              "candidates": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "value_status": {
+                "const": "AMBIGUOUS"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 1
+              },
+              "evidence": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,2 @@
+[console_scripts]
+cleardraft = cleardraft.__main__:main

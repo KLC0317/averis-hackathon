@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evidence-backed email classification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "category",
+    "request_subtype",
+    "requires_review",
+    "alternative_categories",
+    "evidence",
+    "reason"
+  ],
+  "properties": {
+    "category": {
+      "enum": [
+        "BL_COMPARISON",
+        "SI_REQUEST",
+        "INVOICE_QUERY",
+        "GENERAL",
+        "SPAM"
+      ]
+    },
+    "request_subtype": {
+      "enum": [
+        "COMPARE_ATTACHED",
+        "REQUEST_DRAFT_FOR_CHECKING",
+        "OTHER_REQUEST",
+        "UNCLEAR"
+      ]
+    },
+    "requires_review": {
+      "type": "boolean"
+    },
+    "alternative_categories": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "BL_COMPARISON",
+          "SI_REQUEST",
+          "INVOICE_QUERY",
+          "GENERAL",
+          "SPAM"
+        ]
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "quote"
+        ],
+        "properties": {
+          "source": {
+            "enum": [
+              "subject",
+              "current_body",
+              "full_body"
+            ]
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 600
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "requires_review": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "alternative_categories": {
+            "maxItems": 0
+          },
+          "evidence": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

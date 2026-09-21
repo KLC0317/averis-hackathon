@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "observed_at": "2026-09-20",
+  "purpose": "Input inventory, not a prediction or answer manifest",
+  "archives": [
+    {
+      "filename": "sdoc-hackathon-bundle(1).zip",
+      "sha256": "2c7ef1eb3219ca1fced4df40a94020e374cc4981bddfa2a2e65dba6efca588d1",
+      "bytes": 967362
+    },
+    {
+      "filename": "sdoc-hackathon-docker.zip",
+      "sha256": "62c89020c78ab1313d49325b9b9cf3624efb46f3de72176555ecde3c2d7c6fa7",
+      "bytes": 1020022
+    }
+  ],
+  "participant": {
+    "email_count": 520,
+    "email_keys": [
+      "attachments",
+      "body",
+      "email_id",
+      "from",
+      "subject"
+    ],
+    "attachment_count": 250,
+    "attachment_formats": {
+      ".docx": 8,
+      ".pdf": 28,
+      ".txt": 192,
+      ".xlsx": 22
+    },
+    "attachment_count_per_email": {
+      "0": 394,
+      "1": 2,
+      "2": 124
+    },
+    "template_entry_count": 520,
+    "template_is_all_general_ok_placeholders": true,
+    "zero_byte_attachment_count": 0
+  },
+  "public_copies_match": true,
+  "public_copy_count_compared": 770,
+  "pdf_spot_checks": {
+    "no_native_text": [
+      "email_512_SI.pdf",
+      "email_512_BL.pdf",
+      "email_513_SI.pdf",
+      "email_513_BL.pdf",
+      "email_514_SI.pdf",
+      "email_514_BL.pdf"
+    ],
+    "reader_error": [
+      "email_511_BL.pdf",
+      "email_515_BL.pdf"
+    ],
+    "note": "Native-text inspection only; OCR success was not measured."
+  },
+  "available_context": [
+    "Email subject/body/from",
+    "Explicit attachment references",
+    "Shipment details inside attachments",
+    "Submission shape",
+    "Public scoring implementation"
+  ],
+  "missing_structured_business_data": [
+    "Arrival timestamps",
+    "Thread/revision links",
+    "Operational deadlines",
+    "Handling-time history",
+    "Staffing/capacity",
+    "Fees and shipment loss history"
+  ],
+  "cautions": [
+    "The Docker archive contains evaluator-only answers; do not read them for inference or fixture labels.",
+    "No-attachment reference conventions differ between documentation sources.",
+    "Some image-only reference cases may be recoverable by OCR.",
+    "The sample submission is a schema template, not correct labels.",
+    "Never use email numbers, filename suffixes, or documented category proportions as answer shortcuts."
+  ],
+  "answer_key_contents_read": false,
+  "sources_read": [
+    "participant README",
+    "participant inbox and selected attachments",
+    "participant sample submission and loader",
+    "Docker README and data_v2 README",
+    "server scoring.py",
+    "server app.py",
+    "docker-compose.yml"
+  ]
+}

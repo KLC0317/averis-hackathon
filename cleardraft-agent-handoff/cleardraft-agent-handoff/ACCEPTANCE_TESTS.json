@@ -1,0 +1,777 @@
+{
+  "schema_version": "1.0",
+  "status": "Specification; application tests have not been executed",
+  "instructions": "Implement these behaviors as tests; preserve exact IDs so backlog and reports can trace coverage. Use real reviewed source fixtures where stated and clearly labeled controlled fixtures otherwise.",
+  "tests": [
+    {
+      "id": "AC-001",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Import the supplied participant bundle",
+      "given": "The attached participant ZIP is accessible",
+      "when": "Import once",
+      "then": "520 email records and 250 attachments are accounted for; raw bytes and input hashes are retained.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-002",
+      "priority": "P0",
+      "layer": "security",
+      "title": "Reject unsafe archive paths",
+      "given": "A synthetic archive contains traversal, an absolute path, or a symlink",
+      "when": "Attempt import",
+      "then": "Import rejects unsafe entries before materialization and cannot write outside its root.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-003",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Preserve missing attachment cases",
+      "given": "A comparison email references absent source bytes",
+      "when": "Import and process",
+      "then": "The email remains visible; it is not silently dropped or auto-cleared.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-004",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Repeat import idempotently",
+      "given": "A manifest already exists",
+      "when": "Import identical bytes again",
+      "then": "The operation returns/reuses the existing manifest or clearly links a duplicate without duplicating active work.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-005",
+      "priority": "P0",
+      "layer": "security",
+      "title": "Isolate evaluator answers",
+      "given": "An evaluator-only canary is stored beside the private answer key",
+      "when": "Inspect application mounts and attempt app-side access in a test",
+      "then": "The application cannot read evaluator files; only aggregate scoring is available.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-006",
+      "priority": "P0",
+      "layer": "contract",
+      "title": "Reject placeholder submission as predictions",
+      "given": "The organizer template contains default GENERAL/OK entries",
+      "when": "Create initial dataset state",
+      "then": "Template rows define shape only and never populate completed application results.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-007",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Distinguish state dimensions",
+      "given": "A parser executes successfully but finds missing gross weight",
+      "when": "Aggregate case states",
+      "then": "Processing succeeds, verification needs review, and operational state remains open/awaiting information.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-008",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Recover a terminated worker",
+      "given": "A persisted job is interrupted after reading one document",
+      "when": "Restart the worker after lease expiry",
+      "then": "It resumes or safely reruns without duplicate versions, review events, or lost cases.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-009",
+      "priority": "P0",
+      "layer": "reader",
+      "title": "Read text with multiline parties",
+      "given": "A reviewed TXT pair contains multiline names/addresses and different labels",
+      "when": "Read and extract",
+      "then": "Named entities and supporting blocks are preserved without swallowing the next field.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-010",
+      "priority": "P0",
+      "layer": "reader",
+      "title": "Read native PDF with geometry",
+      "given": "A native-text PDF has shipment fields in columns/tables",
+      "when": "Read and preview",
+      "then": "Extracted blocks retain page and geometry; evidence highlights correspond to actual source content.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-011",
+      "priority": "P0",
+      "layer": "reader",
+      "title": "Handle an image-only PDF",
+      "given": "A legible controlled image PDF or supplied image-only source is selected",
+      "when": "Attempt OCR and extraction",
+      "then": "Supported readings can be compared; unreadable/ambiguous fields remain reviewable, with OCR method shown.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-012",
+      "priority": "P0",
+      "layer": "reader",
+      "title": "Handle a corrupt PDF",
+      "given": "A malformed supplied or controlled PDF cannot be opened",
+      "when": "Process it",
+      "then": "The failure is visible and recoverable; no successful match is fabricated.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-013",
+      "priority": "P0",
+      "layer": "reader",
+      "title": "Read DOCX tables and paragraphs",
+      "given": "A reviewed DOCX fixture includes paragraphs, table cells, and bilingual labels",
+      "when": "Read and extract",
+      "then": "Fields reference real paragraph/table locations; unsupported shapes are disclosed.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-014",
+      "priority": "P0",
+      "layer": "reader",
+      "title": "Read XLSX merged cells",
+      "given": "A reviewed workbook has merged labels and values",
+      "when": "Read and extract",
+      "then": "Anchor values and merged ranges retain worksheet/cell provenance.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-015",
+      "priority": "P0",
+      "layer": "reader",
+      "title": "Handle formula without cached value",
+      "given": "A required workbook field is a formula with no cached result",
+      "when": "Read it without a supported calculation engine",
+      "then": "The formula is retained and the needed value remains unresolved, not zero.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-016",
+      "priority": "P0",
+      "layer": "contract",
+      "title": "Reject foreign evidence",
+      "given": "A provider returns a block ID from a different document",
+      "when": "Validate its output",
+      "then": "The candidate is rejected; foreign evidence cannot support a resolved field.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-017",
+      "priority": "P0",
+      "layer": "contract",
+      "title": "Reject fabricated quotes",
+      "given": "A provider quote is absent from its cited block",
+      "when": "Validate its output",
+      "then": "A bounded repair/reread or review follows; the unsupported quote never appears as verified evidence.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-018",
+      "priority": "P0",
+      "layer": "classification",
+      "title": "Classify current message rather than quoted history",
+      "given": "A reviewed email has a current invoice query above an old BL request",
+      "when": "Classify",
+      "then": "The current request determines the category; supporting evidence identifies the current body.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-019",
+      "priority": "P0",
+      "layer": "classification",
+      "title": "Classify comparison with no attachments",
+      "given": "A reviewed email asks for a BL check or a draft for checking but has no files",
+      "when": "Classify and process",
+      "then": "The request may be BL_COMPARISON and needs review for absent source; attachment absence does not force GENERAL.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-020",
+      "priority": "P0",
+      "layer": "classification",
+      "title": "Support five categories",
+      "given": "A reviewed fixture set covers all organizer categories",
+      "when": "Classify the set",
+      "then": "Only the five allowed labels are emitted; non-comparison cases stop at classification.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-021",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Identify wrong document despite filename",
+      "given": "The supplied email_501 second attachment is an invoice named as a BL",
+      "when": "Identify roles and compare",
+      "then": "It produces wrong_doc_type review, never a completed SI/BL match.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-022",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Require selection for ambiguous versions",
+      "given": "A controlled case includes two plausible BL versions",
+      "when": "Process without an explicit selection",
+      "then": "A pair-selection task appears; documents are not merged or guessed globally.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-023",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Extract documents independently",
+      "given": "The SI omits a weight and the BL contains one",
+      "when": "Run both extractors",
+      "then": "SI weight stays missing; the BL value is not copied into it.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-024",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Align field-label synonyms",
+      "given": "Reviewed sources use Port of Loading and Load Port for the same value",
+      "when": "Normalize labels",
+      "then": "Both map to port_of_loading without a false discrepancy.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-025",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Treat numeric formatting conservatively",
+      "given": "A reviewed weight uses 22,000 KG and its peer uses 22000 kg",
+      "when": "Normalize and compare",
+      "then": "They match under explicit grouping/unit rules; evidence and conversion are retained.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-026",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Convert explicit metric tonnes",
+      "given": "One source explicitly states 22 metric tonnes and the other 22000 kg",
+      "when": "Normalize and compare",
+      "then": "Exact conversion produces equal canonical kilograms.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-027",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Keep net and gross distinct",
+      "given": "Only net weight is available where gross is required",
+      "when": "Extract gross_weight_kg",
+      "then": "The required gross field remains unresolved.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-028",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Count containers rather than size/packages",
+      "given": "A source states 6 x 40 HC and also 120 packages",
+      "when": "Extract container_count",
+      "then": "The canonical container count is 6, not 40 or 120.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-029",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Do not fuzzy-match distinct entities",
+      "given": "Two named organizations have similar strings but meaningful different tokens",
+      "when": "Compare party fields",
+      "then": "They are not automatically equated by fuzzy similarity.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-030",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Preserve conflicting port context",
+      "given": "Matching port codes appear alongside conflicting port names/countries",
+      "when": "Compare ports",
+      "then": "The conflict triggers review; code agreement alone does not force a match.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-031",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Resolve same-document party reference",
+      "given": "Notify party says Same as consignee and consignee is present",
+      "when": "Resolve reference",
+      "then": "Resolution uses only that document and includes both evidence spans; ambiguous consignee prevents resolution.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-032",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Treat placeholders as missing",
+      "given": "A required field is N/A, TBA, ???, underscores, or empty",
+      "when": "Normalize",
+      "then": "The value is missing/unresolved, not equal empty strings or zero.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-033",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Confirm a source-reviewed matching pair",
+      "given": "The supplied email_001 pair is processed through the real pipeline",
+      "when": "Compare seven fields",
+      "then": "The reviewed seven-field result is MATCH/OK with source evidence; no hardcoded ID logic is used.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-034",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Find exact supplied discrepancies",
+      "given": "The supplied email_004 pair is processed",
+      "when": "Compare seven fields",
+      "then": "Consignee and notify_party differ; the count and weight do not become extra defect fields.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-035",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Retain mixed findings",
+      "given": "A controlled pair has two confirmed differences and one missing required field",
+      "when": "Aggregate and export",
+      "then": "Internal state preserves differences and unresolved field; organizer projection is NEEDS_REVIEW with separate full report.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-036",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Never equate absent values",
+      "given": "Both source documents omit the same required field",
+      "when": "Compare",
+      "then": "The field is unresolved; seven-field MATCH is impossible.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-037",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Navigate evidence for a finding",
+      "given": "A case has source-linked field results",
+      "when": "Click a field row",
+      "then": "Both SI and BL sources open at correct passages/cells; raw and normalized values are available.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-038",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Resolve just the uncertain reading",
+      "given": "One field is ambiguous and others are resolved on unchanged documents",
+      "when": "Confirm a source-supported reading",
+      "then": "An assisted run recomputes the affected dependency closure and preserves unaffected findings.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-039",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Preserve machine evaluation after review",
+      "given": "A machine run contains a mistake later corrected by a user",
+      "when": "Save the correction",
+      "then": "Original machine results/metrics remain unchanged; assisted results have distinct provenance.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-040",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Request truly missing source information",
+      "given": "A supplied missing-value case such as email_516 is open",
+      "when": "Open review task",
+      "then": "The UI asks for SI gross-weight source information, not autofill from the BL.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-041",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Reject stale human decisions",
+      "given": "A reviewer opened a task before a newer pair became current",
+      "when": "Submit the old expected case version",
+      "then": "Server returns 409 and UI refreshes context; no newer state is overwritten.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-042",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Recompute referenced fields",
+      "given": "Notify party depends on same-document consignee",
+      "when": "Correct the consignee transcription",
+      "then": "Notify-party derivation is also recomputed; dependent evidence is not stale.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-043",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Recheck all fields after revision",
+      "given": "A synthetic BL revision corrects two names and changes the container count",
+      "when": "Upload into the selected case",
+      "then": "All seven fields are checked; resolved name issues and new count mismatch are distinguished.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-044",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Invalidate old approvals on changed source",
+      "given": "A previously reviewed field belongs to a replaced document version",
+      "when": "Upload changed source bytes with the same filename",
+      "then": "Prior human decision remains historical and cannot automatically approve the new field.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-045",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Prepare an unsent editable draft",
+      "given": "A case has confirmed discrepancies",
+      "when": "Prepare, edit, copy, and download a draft",
+      "then": "Only supported values are included; no external message is sent and changed findings mark the draft stale.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-046",
+      "priority": "P0",
+      "layer": "contract",
+      "title": "Validate exact export coverage",
+      "given": "The selected import has an expected email-ID manifest",
+      "when": "Export a completed run",
+      "then": "All original IDs and no extra IDs occur; duplicate/missing entries block valid export.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-047",
+      "priority": "P0",
+      "layer": "contract",
+      "title": "Validate status consistency",
+      "given": "An entry says MISMATCH with no fields or NEEDS_REVIEW with has_defect true",
+      "when": "Validate export",
+      "then": "Strict schema rejects inconsistent output even if the organizer server would accept it.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-048",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Keep benchmark convention disagreement honest",
+      "given": "A comparison lacks attachments or OCR recovers an image-only source",
+      "when": "Export and score",
+      "then": "Actual content-based outcome is retained and differences are documented without ID-based relabeling.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-049",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Bind score to exact export",
+      "given": "A valid export is submitted to the isolated evaluator",
+      "when": "Persist response then change application results",
+      "then": "Old score remains bound to the original export hash and is not presented as current.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-050",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Block unrepresentable incomplete export",
+      "given": "A run has pending tasks or an unmapped provider failure",
+      "when": "Request complete submission",
+      "then": "Export is blocked with a diagnostic list; an explicitly partial report remains available.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-051",
+      "priority": "P1",
+      "layer": "evaluation",
+      "title": "Use comparable baseline inputs",
+      "given": "Baseline and proposed pipeline evaluate the same reviewed sample",
+      "when": "Run comparison",
+      "then": "Input hashes/provider differences/budgets are recorded and model outputs are frozen before human review.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-052",
+      "priority": "P1",
+      "layer": "evaluation",
+      "title": "Keep mutations in their original split",
+      "given": "A reviewed original is assigned to development or held-out evaluation",
+      "when": "Generate variants",
+      "then": "Every variant inherits the original group; no same-original train/test leakage occurs.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-053",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Change actual source bytes in challenge mode",
+      "given": "A reviewed clean text pair supports container-count mutation",
+      "when": "Run the mutation",
+      "then": "A new BL byte hash and verified change manifest are created, original bytes untouched, expected field effect stored.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-054",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Run judge-selected challenge honestly",
+      "given": "A user selects renamed files, changed count, or removed value",
+      "when": "Run challenge from UI",
+      "then": "The real pipeline executes on changed inputs and shows expected versus actual outcomes without prefilled passes.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-055",
+      "priority": "P1",
+      "layer": "evaluation",
+      "title": "Distinguish safe abstention and recovery",
+      "given": "A scan challenge permits either supported reading or unresolved output",
+      "when": "Evaluate outcome",
+      "then": "Recovery and safe abstention are reported separately; abstention is not called successful extraction.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-056",
+      "priority": "P0",
+      "layer": "security",
+      "title": "Treat email assertions as data",
+      "given": "An email claims all fields are correct while documents retain a discrepancy",
+      "when": "Run verification",
+      "then": "Source documents still determine the result; the assertion cannot bypass the comparator.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-057",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Do not replay changed inputs",
+      "given": "A recorded run exists for original source hashes",
+      "when": "Change a source and request replay",
+      "then": "Replay rejects the mismatch or invokes actual processing; no stale original answer is returned as fresh.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-058",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Start without provider credentials",
+      "given": "No model API key is configured",
+      "when": "Start app and run local mode",
+      "then": "Supported cases process through real local rules; live mode is unavailable explicitly and unresolved cases remain visible.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-059",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Bound provider timeout and retries",
+      "given": "A provider repeatedly times out or rate-limits",
+      "when": "Run a job",
+      "then": "Attempts stop at the configured limit; failure/retry is visible and DB writes are not locked during backoff.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-060",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Handle OCR unavailable",
+      "given": "OCR executable or language data is missing",
+      "when": "Run doctor and encounter an image-only document",
+      "then": "Readiness reports the limitation; native sources still work and the scan is not auto-cleared.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-061",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Keep counts and filters consistent",
+      "given": "The import contains classified-only, clean, mismatch, and review cases",
+      "when": "Click summary counts and filters",
+      "then": "Visible rows reconcile to the underlying counts; classification-only is distinct from verified.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-062",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Support keyboard and responsive layout",
+      "given": "Working app has case and review dialogs",
+      "when": "Navigate by keyboard at desktop and mobile widths",
+      "then": "Controls are usable, focus is managed, evidence readable, and status is not color-only.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-063",
+      "priority": "P1",
+      "layer": "evaluation",
+      "title": "Use honest comparison denominators",
+      "given": "Many emails are non-comparison requests",
+      "when": "Compute automation coverage",
+      "then": "Classified-only messages are excluded from comparison-completion coverage; denominators are displayed.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-064",
+      "priority": "P1",
+      "layer": "evaluation",
+      "title": "Keep study claims unmeasured without people",
+      "given": "No human-review sessions exist",
+      "when": "Open the business report",
+      "then": "It displays pending measurement, not invented minutes saved or annual savings.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-065",
+      "priority": "P1",
+      "layer": "evaluation",
+      "title": "Separate run modes and assistance",
+      "given": "Live, local, replay, machine-only, and assisted runs exist",
+      "when": "Display/export metrics",
+      "then": "Mode and assistance are distinct; replay latency and assisted corrections cannot inflate live machine performance.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-066",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Persist across application restart",
+      "given": "A processed import and review history exist",
+      "when": "Restart all app services without reset",
+      "then": "Cases, source versions, findings, and history remain available.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-067",
+      "priority": "P0",
+      "layer": "security",
+      "title": "Keep secrets and raw paths out of client",
+      "given": "API/provider configuration exists",
+      "when": "Inspect client responses, bundle, and normal logs",
+      "then": "Credentials, physical file paths, and private evaluator data are absent.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-068",
+      "priority": "P1",
+      "layer": "release",
+      "title": "Reproduce from documented setup",
+      "given": "A clean supported machine has the source and supplied ZIPs",
+      "when": "Follow README and execute release commands",
+      "then": "App starts, data imports, checks/tests run, and valid export/report artifacts are produced with actual limitations documented.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-069",
+      "priority": "P1",
+      "layer": "release",
+      "title": "Avoid mock differentiation",
+      "given": "The proposed demo is rehearsed",
+      "when": "Execute uncertain-field review, revision, and challenge flows",
+      "then": "Each action reaches real backend/persistence/pipeline behavior; no required feature is only a static mock.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-070",
+      "priority": "P1",
+      "layer": "evaluation",
+      "title": "Report zero observed errors with sample size",
+      "given": "A reviewed sample has no observed false clearances",
+      "when": "Generate report",
+      "then": "It states zero observed among N tested cases and avoids a production guarantee.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-071",
+      "priority": "P0",
+      "layer": "contract",
+      "title": "Validate extraction completeness",
+      "given": "A provider returns six fields or an extra unsupported field",
+      "when": "Validate structured extraction",
+      "then": "The schema rejects missing/extra keys; no omitted field is silently treated as matching.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-072",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Bound import/document resources",
+      "given": "An archive or document exceeds configured size/page limits",
+      "when": "Attempt processing",
+      "then": "It fails visibly with a reason and retains valid unrelated cases; no silent source truncation occurs.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-073",
+      "priority": "P1",
+      "layer": "integration",
+      "title": "Keep cancellation and retry auditable",
+      "given": "A user cancels an active batch then retries selected failures",
+      "when": "Process cancellation and retry",
+      "then": "Completed work remains, new stages stop when feasible, and retry produces traceable new attempts.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-074",
+      "priority": "P1",
+      "layer": "browser",
+      "title": "Keep test variants out of operational queue",
+      "given": "A judge generates several challenge cases",
+      "when": "Return to inbox and organizer export",
+      "then": "Variants remain in test mode and cannot inflate original counts or enter the original submission.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-075",
+      "priority": "P0",
+      "layer": "unit",
+      "title": "Preserve identifier context without extra defect fields",
+      "given": "The email explicitly pairs an SI and BL with different identifier types",
+      "when": "Compare the required seven fields",
+      "then": "Booking/BL-number differences alone do not become an eighth defect field or an unjustified pair rejection.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-076",
+      "priority": "P0",
+      "layer": "contract",
+      "title": "Handle unsupported schema features in provider adapter",
+      "given": "The chosen provider supports only a subset of JSON Schema",
+      "when": "Configure structured output",
+      "then": "The adapter supplies a supported wire schema and still applies the full canonical validator locally; guarantees are not weakened.",
+      "status": "not_implemented"
+    },
+    {
+      "id": "AC-077",
+      "priority": "P0",
+      "layer": "integration",
+      "title": "Prevent stale worker result becoming current",
+      "given": "An older comparison job is still running when the user selects a newer document pair",
+      "when": "The older job completes after the newer pair becomes current",
+      "then": "The old result remains historical; compare-and-swap prevents it from overwriting the active pair result.",
+      "status": "not_implemented"
+    }
+  ]
+}
