@@ -186,6 +186,39 @@ class Store:
                         json.dumps(read_json, ensure_ascii=False) if read_json else None, utc_now()))
         return did
 
+    def bump_case_version(self, case_id: str, expected_version: int) -> int | None:
+        """Advance a case version using optimistic concurrency."""
+        with self.connect() as db:
+            cur = db.execute(
+                "UPDATE cases SET version=version+1,updated_at=? WHERE id=? AND version=?",
+                (utc_now(), case_id, expected_version),
+            )
+            if cur.rowcount != 1:
+                return None
+            row = db.execute("SELECT version FROM cases WHERE id=?", (case_id,)).fetchone()
+        return int(row["version"]) if row else None
+
+    def add_document_for_case(self, case_id: str, import_id: str, email_id: str,
+                              attachment_path: str, filename: str, sha256: str,
+                              fmt: str, data: bytes, read_json: dict[str, Any] | None,
+                              expected_version: int) -> tuple[str, int] | None:
+        """Insert a replacement source and advance its case version atomically."""
+        did = str(uuid.uuid4())
+        now = utc_now()
+        with self.connect() as db:
+            cur = db.execute(
+                "UPDATE cases SET version=version+1,updated_at=? WHERE id=? AND version=?",
+                (now, case_id, expected_version),
+            )
+            if cur.rowcount != 1:
+                return None
+            db.execute(
+                "INSERT INTO documents(id,import_id,email_id,attachment_path,filename,sha256,format,size,bytes,read_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (did, import_id, email_id, attachment_path, filename, sha256, fmt, len(data), data,
+                 json.dumps(read_json, ensure_ascii=False) if read_json else None, now),
+            )
+        return did, expected_version + 1
+
     def update_import_counts(self, import_id: str, emails: int, documents: int, issues: list[str]) -> None:
         with self.connect() as db:
             db.execute("UPDATE imports SET email_count=?, document_count=?, issues_json=? WHERE id=?", (emails, documents, json.dumps(issues), import_id))
@@ -203,8 +236,9 @@ class Store:
 
     def save_case_result(self, run_id: str, case_id: str, category: str, classification: dict[str, Any], result: dict[str, Any], verification: str) -> None:
         with self.connect() as db:
+            processing = str(result.get("processing", "SUCCEEDED"))
             db.execute("UPDATE cases SET category=?,classification_json=?,processing=?,verification=?,result_json=?,updated_at=?,version=version+1 WHERE id=?",
-                       (category, json.dumps(classification), "SUCCEEDED", verification, json.dumps(result, ensure_ascii=False), utc_now(), case_id))
+                       (category, json.dumps(classification), processing, verification, json.dumps(result, ensure_ascii=False), utc_now(), case_id))
             for field, fr in ((x["field"], x) for x in result.get("fields", [])):
                 db.execute("INSERT OR REPLACE INTO field_results(id,run_id,case_id,field,result_json) VALUES(?,?,?,?,?)",
                            (str(uuid.uuid4()), run_id, case_id, field, json.dumps(fr, ensure_ascii=False)))

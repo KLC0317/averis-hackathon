@@ -13,6 +13,8 @@
   convert different party names into a match.
 - Local SQLite and one worker target reproducible single-host judging. This is
   not a distributed or multi-tenant production deployment.
+- `replay` is fail-closed until a recorded fixture with input/model/policy hash
+  validation is configured; it must not silently reuse a local-rules result.
 - Draft correction and information-request text is editable for copying or
   downloading; the application does not send email or approve a legal shipping
   document.

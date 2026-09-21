@@ -304,8 +304,19 @@ def create_app(db_path: str | None = None):
             raise HTTPException(409, "stale case")
         data = await file.read()
         read = read_document(data, file.filename or "document")
-        document_id = store.add_document(case["import_id"], case["email_id"], f"attachments/{file.filename}", Path(file.filename or "document").name, read.sha256, read.detected_format, data, read.to_dict())
-        return {"document_id": document_id, "role_hint": role_hint, "read": read.to_dict(), "case_version": case["version"]}
+        if expected_version >= 0:
+            inserted = store.add_document_for_case(
+                case_id, case["import_id"], case["email_id"],
+                f"attachments/{file.filename}", Path(file.filename or "document").name,
+                read.sha256, read.detected_format, data, read.to_dict(), expected_version,
+            )
+            if inserted is None:
+                raise HTTPException(409, "stale case")
+            document_id, new_version = inserted
+        else:
+            document_id = store.add_document(case["import_id"], case["email_id"], f"attachments/{file.filename}", Path(file.filename or "document").name, read.sha256, read.detected_format, data, read.to_dict())
+            new_version = case["version"]
+        return {"document_id": document_id, "role_hint": role_hint, "read": read.to_dict(), "case_version": new_version}
 
     @app.post("/api/v1/cases/{case_id}/pair")
     @app.post("/cases/{case_id}/pair")

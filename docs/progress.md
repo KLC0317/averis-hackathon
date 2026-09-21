@@ -23,7 +23,9 @@ The repository now has focused reader, API, recovery, duplicate-input, revision,
 replay-boundary, and artifact-contract tests. The web package exposes explicit
 `typecheck` and `test` scripts; `scripts/run_all_checks.py` fails on required
 checks instead of suppressing their exit codes. Environment-specific pytest
-runs may need a writable temporary directory on Windows.
+runs may need a writable temporary directory on Windows. The report command now
+writes input/policy/manifest hashes, persisted outcome counts, and explicit
+pending fields; it does not invent scores or study results.
 
 ## Current status
 

@@ -6,8 +6,10 @@
 - [ ] TXT, native PDF, scanned PDF/OCR, DOCX, XLSX, corrupt, and missing source
       paths are exercised.
 - [ ] Every resolved field links to source evidence.
-- [ ] Missing or ambiguous values cannot produce an automatic seven-field match.
-- [ ] Review, revision, retry, stale-action, and worker-restart paths pass.
+- [x] Missing or ambiguous values cannot produce an automatic seven-field match.
+- [x] Focused reader, API, recovery, duplicate-import, revision, and replay-boundary
+      tests pass (`45 passed` in the local writable-temp run).
+- [ ] Review, revision, retry, stale-action, and worker-restart paths pass end to end.
 - [ ] Eight browser flows and empty/error states pass.
 - [ ] Export has exactly all known email IDs and validates against the strict
       organizer schema.

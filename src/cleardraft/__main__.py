@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -97,14 +99,51 @@ def command_report(args: argparse.Namespace) -> int:
     store = _store(args.db)
     with store.connect() as db:
         run = db.execute("SELECT * FROM runs WHERE id=?", (args.run_id,)).fetchone()
-        if not run: raise ValueError(f"run not found: {args.run_id}")
+        if not run:
+            raise ValueError(f"run not found: {args.run_id}")
         import_row = db.execute("SELECT * FROM imports WHERE id=?", (run["import_id"],)).fetchone()
-        cases = db.execute("SELECT verification, processing FROM cases WHERE import_id=?", (run["import_id"],)).fetchall()
-    report = {"run_id": args.run_id, "import_id": run["import_id"], "mode": run["mode"], "status": run["status"],
-              "counts": {"cases": len(cases), "match": sum(x["verification"] == "MATCH" for x in cases),
-                         "mismatch": sum(x["verification"] == "MISMATCH" for x in cases),
-                         "needs_review": sum(x["verification"] == "NEEDS_REVIEW" for x in cases),
-                         "not_applicable": sum(x["verification"] == "NOT_APPLICABLE" for x in cases)}}
+        cases = db.execute(
+            "SELECT category, verification, processing, result_json FROM cases WHERE import_id=?",
+            (run["import_id"],),
+        ).fetchall()
+    verification = Counter(str(x["verification"]) for x in cases)
+    processing = Counter(str(x["processing"]) for x in cases)
+    categories = Counter(str(x["category"]) for x in cases if x["category"])
+    unresolved = 0
+    confirmed_mismatches = 0
+    for row in cases:
+        try:
+            result = json.loads(row["result_json"] or "{}")
+        except json.JSONDecodeError:
+            result = {}
+        unresolved += len(result.get("unresolved_fields", []))
+        confirmed_mismatches += len(result.get("confirmed_mismatch_fields", []))
+    report = {
+        "artifact_type": "cleardraft_run_report",
+        "report_version": "1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": args.run_id,
+        "import_id": run["import_id"],
+        "mode": run["mode"],
+        "status": run["status"],
+        "input_hash": run["input_hash"],
+        "policy_version": run["policy_version"],
+        "import_manifest_hash": import_row["manifest_hash"] if import_row else None,
+        "counts": {
+            "cases": len(cases),
+            "verification": dict(sorted(verification.items())),
+            "processing": dict(sorted(processing.items())),
+            "categories": dict(sorted(categories.items())),
+            "unresolved_fields": unresolved,
+            "confirmed_mismatch_fields": confirmed_mismatches,
+        },
+        "claims": {
+            "organizer_score": None,
+            "human_study": "not_run",
+            "screenshots": "not_generated",
+            "ocr_success_rate": None,
+        },
+    }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report))

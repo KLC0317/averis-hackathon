@@ -55,7 +55,11 @@ manifest hash. A second import of identical bytes reuses the manifest.
 python -m cleardraft import --participant-root .\sdoc-hackathon-bundle
 python -m cleardraft run --import-id <id> --mode local_rules
 python -m cleardraft export --run-id <id> --machine-only --out .\artifacts\submission.json
+python -m cleardraft report --run-id <id> --out .\artifacts\run-report.json
 ```
+
+The report is a provenance/count artifact. It records hashes and explicit
+pending measurements; it is not an organizer score or human-study result.
 
 The generated submission must contain exactly one entry for each original
 `email_id` and only the five fields required by the organizer schema.
