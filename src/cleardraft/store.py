@@ -10,7 +10,7 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -101,7 +101,19 @@ class Store:
               id TEXT PRIMARY KEY, run_id TEXT NOT NULL, path TEXT NOT NULL,
               bytes_hash TEXT, machine_only INTEGER NOT NULL, created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS jobs (
+              id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}',
+              result_json TEXT, status TEXT NOT NULL DEFAULT 'QUEUED', attempts INTEGER NOT NULL DEFAULT 0,
+              max_attempts INTEGER NOT NULL DEFAULT 3, available_at TEXT NOT NULL,
+              lease_owner TEXT, lease_expires_at TEXT, heartbeat_at TEXT,
+              last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, created_at);
             """)
+            # Keep databases created by an earlier resilience slice readable.
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)").fetchall()}
+            if "result_json" not in columns:
+                db.execute("ALTER TABLE jobs ADD COLUMN result_json TEXT")
 
     def get_or_create_import(self, source_mode: str, manifest_hash: str, *,
                              issues: list[str] | None = None) -> tuple[str, bool]:
@@ -330,3 +342,120 @@ class Store:
         with self.connect() as db:
             row = db.execute("SELECT * FROM runs WHERE import_id=? ORDER BY created_at DESC LIMIT 1", (import_id,)).fetchone()
         return dict(row) if row else None
+
+    def enqueue_job(self, kind: str, payload: dict[str, Any] | None = None, *,
+                    max_attempts: int = 3, available_at: str | None = None) -> str:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        job_id = str(uuid.uuid4())
+        now = utc_now()
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO jobs(id,kind,payload_json,max_attempts,available_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (job_id, kind, json.dumps(payload or {}, ensure_ascii=False), max_attempts,
+                 available_at or now, now, now),
+            )
+        return job_id
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        return self._job_value(row) if row else None
+
+    @staticmethod
+    def _job_value(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        value = dict(row)
+        value["payload"] = json.loads(value.pop("payload_json") or "{}")
+        raw_result = value.pop("result_json", None)
+        value["result"] = json.loads(raw_result) if raw_result else None
+        return value
+
+    def recover_expired_jobs(self, *, now: str | None = None) -> int:
+        """Return leased jobs whose worker disappeared to the queue atomically."""
+        current = now or utc_now()
+        with self.connect() as db:
+            cur = db.execute(
+                "UPDATE jobs SET status='QUEUED', lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, "
+                "available_at=?, updated_at=? WHERE status='RUNNING' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
+                (current, current, current),
+            )
+            return cur.rowcount
+
+    def claim_job(self, worker_id: str, *, lease_seconds: float = 30.0, now: str | None = None) -> dict[str, Any] | None:
+        """Atomically claim the oldest available job, recovering stale leases first."""
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        current = now or utc_now()
+        expires = (datetime.fromisoformat(current) + timedelta(seconds=lease_seconds)).isoformat()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "UPDATE jobs SET status='QUEUED', lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, available_at=?, updated_at=? "
+                "WHERE status='RUNNING' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
+                (current, current, current),
+            )
+            row = db.execute(
+                "SELECT * FROM jobs WHERE status='QUEUED' AND available_at<=? AND attempts<max_attempts ORDER BY created_at, id LIMIT 1",
+                (current,),
+            ).fetchone()
+            if row is None:
+                return None
+            cur = db.execute(
+                "UPDATE jobs SET status='RUNNING', attempts=attempts+1, lease_owner=?, lease_expires_at=?, heartbeat_at=?, updated_at=? "
+                "WHERE id=? AND status='QUEUED'",
+                (worker_id, expires, current, current, row["id"]),
+            )
+            if cur.rowcount != 1:
+                return None
+            claimed = db.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone()
+        return self._job_value(claimed)
+
+    def heartbeat_job(self, job_id: str, worker_id: str, *, lease_seconds: float = 30.0,
+                      now: str | None = None) -> bool:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        current = now or utc_now()
+        expires = (datetime.fromisoformat(current) + timedelta(seconds=lease_seconds)).isoformat()
+        with self.connect() as db:
+            cur = db.execute(
+                "UPDATE jobs SET lease_expires_at=?, heartbeat_at=?, updated_at=? WHERE id=? AND status='RUNNING' AND lease_owner=?",
+                (expires, current, current, job_id, worker_id),
+            )
+        return cur.rowcount == 1
+
+    def complete_job(self, job_id: str, worker_id: str, result: dict[str, Any] | None = None) -> bool:
+        with self.connect() as db:
+            cur = db.execute(
+                "UPDATE jobs SET status='SUCCEEDED', result_json=?, lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, updated_at=? "
+                "WHERE id=? AND status='RUNNING' AND lease_owner=?",
+                (json.dumps(result or {}, ensure_ascii=False), utc_now(), job_id, worker_id),
+            )
+        return cur.rowcount == 1
+
+    def fail_job(self, job_id: str, worker_id: str, error: str, *, retry: bool = True,
+                 retry_delay_seconds: float = 0.0) -> bool:
+        now = datetime.now(timezone.utc)
+        with self.connect() as db:
+            row = db.execute("SELECT attempts,max_attempts FROM jobs WHERE id=? AND status='RUNNING' AND lease_owner=?",
+                             (job_id, worker_id)).fetchone()
+            if row is None:
+                return False
+            retryable = retry and row["attempts"] < row["max_attempts"]
+            status = "QUEUED" if retryable else "FAILED"
+            available = (now + timedelta(seconds=max(0.0, retry_delay_seconds))).isoformat()
+            cur = db.execute(
+                "UPDATE jobs SET status=?, last_error=?, available_at=?, lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, updated_at=? "
+                "WHERE id=? AND status='RUNNING' AND lease_owner=?",
+                (status, str(error), available, now.isoformat(), job_id, worker_id),
+            )
+        return cur.rowcount == 1
+
+    def list_jobs(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            if status:
+                rows = db.execute("SELECT * FROM jobs WHERE status=? ORDER BY created_at", (status,)).fetchall()
+            else:
+                rows = db.execute("SELECT * FROM jobs ORDER BY created_at").fetchall()
+        return [self._job_value(row) for row in rows]
