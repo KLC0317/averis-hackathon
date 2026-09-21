@@ -19,9 +19,11 @@ pytest -q
 npm --prefix apps/web run test
 ```
 
-The current local run reports 20 Python tests passing and a successful TypeScript
-check; the production web bundle also builds with `npm --prefix apps/web run
-build`.
+The repository now has focused reader, API, recovery, duplicate-input, revision,
+replay-boundary, and artifact-contract tests. The web package exposes explicit
+`typecheck` and `test` scripts; `scripts/run_all_checks.py` fails on required
+checks instead of suppressing their exit codes. Environment-specific pytest
+runs may need a writable temporary directory on Windows.
 
 ## Current status
 

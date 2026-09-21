@@ -23,7 +23,11 @@ class Store:
     def __init__(self, path: str | Path = "var/cleardraft.db"):
         self._memory = str(path) == ":memory:"
         self.path = Path(path)
-        self._db_target = "file:cleardraft-memory?mode=memory&cache=shared" if self._memory else str(self.path)
+        # Each in-memory store gets its own shared-cache URI. A fixed URI leaks
+        # rows between short-lived isolated runs (notably challenge/recovery
+        # tests) while the anchor connection keeps that database alive.
+        memory_uri = f"file:cleardraft-memory-{uuid.uuid4().hex}?mode=memory&cache=shared"
+        self._db_target = memory_uri if self._memory else str(self.path)
         self._anchor = sqlite3.connect(self._db_target, uri=self._memory) if self._memory else None
         if not self._memory:
             self.path.parent.mkdir(parents=True, exist_ok=True)

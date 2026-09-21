@@ -6,6 +6,8 @@
     "dev": "next dev -p 5173",
     "build": "next build",
     "start": "next start -p 5173",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck",
     "lint": "next lint"
   },
   "dependencies": {

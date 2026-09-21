@@ -117,9 +117,14 @@ def main() -> int:
     submission = check_root / "submission.json"
 
     run("python tests", [PYTHON, "-m", "pytest", "-q"])
-    run("frontend typecheck", [NPM, "run", "test"], cwd=ROOT / "apps" / "web")
-    run("frontend production build", [NPM, "run", "build"], cwd=ROOT / "apps" / "web")
-    run("environment doctor", [PYTHON, "scripts/doctor.py"], check=False)
+    web_root = ROOT / "apps" / "web"
+    run("frontend typecheck", [NPM, "run", "typecheck"], cwd=web_root)
+    run("frontend production build", [NPM, "run", "build"], cwd=web_root)
+    # Required doctor failures must fail this release gate. Optional OCR,
+    # Docker, and Node checks remain informational inside doctor itself.
+    doctor_json = check_root / "doctor.json"
+    doctor_output = run("environment doctor", [PYTHON, "scripts/doctor.py", "--json"])
+    doctor_json.write_text(doctor_output + "\n", encoding="utf-8")
     api_smoke()
 
     imported = parse_last_json(run("full participant import", [PYTHON, "-m", "cleardraft", "--db", str(db), "import", "--directory", str(ROOT / "sdoc-hackathon-bundle")]))
@@ -131,6 +136,8 @@ def main() -> int:
         raise RuntimeError("synthetic source challenge did not pass")
     run("strict export", [PYTHON, "-m", "cleardraft", "--db", str(db), "export", "--run-id", run_id, "--machine-only", "--out", str(submission)])
     run("submission validation", [PYTHON, "scripts/validate_submission.py", str(submission)])
+    report = check_root / "run-report.json"
+    run("run report", [PYTHON, "-m", "cleardraft", "--db", str(db), "report", "--run-id", run_id, "--out", str(report)])
     if args.skip_live:
         print("DeepSeek smoke: SKIPPED (--skip-live)")
     else:

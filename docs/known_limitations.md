@@ -18,5 +18,7 @@
   document.
 - Organizer scoring is optional and externally owned. The application cannot
   claim a score, quality level, or business savings until the corresponding
-  export or human trial has actually run.
+  export or human trial has actually run. Local check artifacts are hashes,
+  counts, and validation evidence only; they are not organizer scores,
+  screenshots, OCR-success rates, or human-study results.
 

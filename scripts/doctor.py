@@ -56,12 +56,23 @@ def inspect_public_bundle(root: Path = PUBLIC_ROOT) -> list[tuple[str, bool, str
 def inspect_environment() -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
     results.append(_check("python", sys.version_info >= (3, 11), sys.version.split()[0]))
-    for module in ("fastapi", "pydantic", "pymupdf", "docx", "openpyxl"):
-        found = importlib.util.find_spec(module) is not None
-        detail = "installed" if found else "missing"
-        if module == "fitz" and not found:
+    # PyMuPDF has used both ``pymupdf`` and ``fitz`` as import names across
+    # supported releases.  Check either name, but report the distribution by
+    # its actual package name so a healthy install is not marked missing.
+    required_modules = {
+        "fastapi": ("fastapi",),
+        "pydantic": ("pydantic",),
+        "PyMuPDF": ("pymupdf", "fitz"),
+        "python-docx": ("docx",),
+        "openpyxl": ("openpyxl",),
+    }
+    for package, modules in required_modules.items():
+        available = next((module for module in modules if importlib.util.find_spec(module) is not None), None)
+        found = available is not None
+        detail = f"installed ({available})" if found else "missing"
+        if package == "PyMuPDF" and not found:
             detail += "; install PyMuPDF for PDF text/geometry"
-        results.append(_check(f"python package: {module}", found, detail))
+        results.append(_check(f"python package: {package}", found, detail))
     tesseract = shutil.which("tesseract")
     results.append(_check("tesseract (optional OCR)", bool(tesseract), tesseract or "not found; scanned PDFs will remain reviewable"))
     results.append(_check("node (web build)", shutil.which("node") is not None, shutil.which("node") or "not found"))

@@ -179,6 +179,11 @@ def run_import(store: Store, import_id: str, mode: str = "local_rules",
                policy: GatewayPolicy | None = None) -> tuple[str, dict[str, VerificationResult]]:
     if mode not in {"local_rules", "live_ai", "replay"}:
         raise ValueError("mode must be local_rules, live_ai, or replay")
+    if mode == "replay":
+        # A replay needs a recorded result plus an input/model/policy hash
+        # contract. Until that store is implemented, never masquerade as a
+        # local run: changed inputs must not receive a stale cached answer.
+        raise ValueError("replay requires a hash-checked recorded run; no replay fixture is configured")
     policy = policy or GatewayPolicy()
     if mode == "live_ai":
         # Provider adapter is optional; local fallback is never silently called

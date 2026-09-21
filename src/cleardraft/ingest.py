@@ -145,7 +145,9 @@ def import_participant(source: str | Path, store: Store) -> str:
         for _, ch, _ in records: manifest.update(ch.encode())
         for eid, rel, _, data in docs:
             manifest.update(eid.encode()); manifest.update(rel.encode()); manifest.update(hashlib.sha256(data).digest())
-        import_id, created = store.get_or_create_import("zip" if src.zip_path else "directory", manifest.hexdigest(), issues=issues)
+        import_id, created = store.get_or_create_import(
+            "zip" if src.zip_path else "directory", manifest.hexdigest(), issues=issues
+        )
         if not created:
             return import_id
         for email, content_hash, _ in records: store.add_email(import_id, email, content_hash)

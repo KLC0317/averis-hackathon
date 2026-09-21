@@ -3,7 +3,9 @@
 Direct Python dependencies are declared in `pyproject.toml` with bounded
 version ranges. The web workspace is locked by `apps/web/package-lock.json`.
 Before a release, record the resolved output from `pip freeze` and `npm ls
---all` so the judge can reproduce the exact environment.
+--all` so the judge can reproduce the exact environment. The repository's
+check script writes doctor, submission, and run-report JSON artifacts, but does
+not claim dependency snapshots unless those commands were actually run.
 
 | Dependency | Use | License family |
 | --- | --- | --- |

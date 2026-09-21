@@ -1,7 +1,7 @@
 # Release checklist
 
 - [ ] README quick start works on a clean machine.
-- [ ] `python -m cleardraft doctor` reports required and optional dependencies.
+- [x] `python -m cleardraft doctor` reports required and optional dependencies.
 - [ ] Import accounts for all 520 emails and 250 public attachments.
 - [ ] TXT, native PDF, scanned PDF/OCR, DOCX, XLSX, corrupt, and missing source
       paths are exercised.
@@ -15,6 +15,6 @@
 - [ ] Baseline and challenge runs use fresh run/source hashes.
 - [ ] Reports distinguish measured results, illustrative calculations, and
       pending human trials.
-- [ ] Dependency versions and relevant licenses are recorded.
+- [x] Dependency versions and relevant licenses are recorded.
 - [ ] Resolved `pip freeze` and `npm ls --all` outputs are archived with the
-      release report.
+      release report (not run in this source-only slice).
