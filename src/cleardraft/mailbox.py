@@ -284,6 +284,30 @@ def generate_demo_inbound_batch(connection_id: str, cursor_uid: int) -> tuple[li
     return [email_record], attachments_dict, new_uid
 
 
+def _parse_since_time(raw: str | datetime | None) -> datetime | None:
+    """Parses various timestamp representations into a UTC datetime."""
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        return raw.astimezone(timezone.utc) if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    raw_str = str(raw).strip()
+    if not raw_str:
+        return None
+    if raw_str.lower() == "now":
+        return datetime.now(timezone.utc)
+    try:
+        dt = datetime.fromisoformat(raw_str)
+        return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
+    try:
+        dt = email.utils.parsedate_to_datetime(raw_str)
+        return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
+    return None
+
+
 def fetch_from_imap(
     host: str,
     port: int,
@@ -291,9 +315,15 @@ def fetch_from_imap(
     password: str,
     folder: str = "INBOX",
     last_uid: int = 0,
-    max_count: int = 20
+    max_count: int = 20,
+    since_time: str | datetime | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, bytes], int]:
-    """Connects to real IMAP server in read-only EXAMINE mode and fetches new messages."""
+    """Connects to real IMAP server in read-only EXAMINE mode and fetches new messages.
+
+    If ``since_time`` is provided (or set in environment), only messages received strictly
+    at or after this cutoff timestamp are returned.
+    """
+    since_dt = _parse_since_time(since_time)
     context = ssl.create_default_context()
     mail = imaplib.IMAP4_SSL(host, port, ssl_context=context)
     try:
@@ -301,8 +331,17 @@ def fetch_from_imap(
         # Read-only EXAMINE to strictly protect mailbox integrity
         mail.select(folder, readonly=True)
 
-        # Search for messages
-        res, data = mail.uid("SEARCH", None, f"UID {last_uid + 1}:*")
+        # Build IMAP search criteria with optional date cutoff
+        if since_dt:
+            imap_date = since_dt.strftime("%d-%b-%Y")
+            if last_uid > 0:
+                search_query = f'(SINCE "{imap_date}" UID {last_uid + 1}:*)'
+            else:
+                search_query = f'(SINCE "{imap_date}")'
+        else:
+            search_query = f"UID {last_uid + 1}:*"
+
+        res, data = mail.uid("SEARCH", None, search_query)
         if res != "OK" or not data or not data[0]:
             return [], {}, last_uid
 
@@ -327,6 +366,24 @@ def fetch_from_imap(
                 if isinstance(part, tuple) and len(part) >= 2:
                     raw_bytes = part[1]
                     email_obj, atts = parse_mime_message(raw_bytes, u)
+
+                    # Precise timestamp filtering down to second
+                    if since_dt:
+                        date_str = email_obj.get("received_at")
+                        msg_dt = None
+                        if date_str:
+                            try:
+                                msg_dt = email.utils.parsedate_to_datetime(date_str)
+                                if msg_dt.tzinfo:
+                                    msg_dt = msg_dt.astimezone(timezone.utc)
+                                else:
+                                    msg_dt = msg_dt.replace(tzinfo=timezone.utc)
+                            except Exception:
+                                pass
+                        if msg_dt and msg_dt < since_dt:
+                            # Skip emails received before cutoff
+                            continue
+
                     emails.append(email_obj)
                     all_attachments.update(atts)
                     break
@@ -339,11 +396,49 @@ def fetch_from_imap(
             pass
 
 
+def sync_mailbox_cursor_to_latest(
+    store: Store,
+    connection_id: str,
+    password: str | None = None,
+) -> dict[str, Any]:
+    """Fast-forwards cursor to the highest existing mailbox UID to ignore historic mail."""
+    conn = store.get_mailbox_connection(connection_id)
+    if not conn:
+        raise ValueError(f"Mailbox connection '{connection_id}' not found")
+    resolved_username, resolved_password = resolve_mailbox_credentials(conn)
+    env_password = password or resolved_password
+    if not env_password:
+        raise RuntimeError("Mailbox password not found")
+
+    context = ssl.create_default_context()
+    mail = imaplib.IMAP4_SSL(conn["host"], int(conn["port"]), ssl_context=context)
+    try:
+        mail.login(resolved_username, env_password)
+        mail.select(conn.get("folder", "INBOX"), readonly=True)
+        res, data = mail.uid("SEARCH", None, "ALL")
+        uids = [int(u) for u in data[0].split()] if res == "OK" and data and data[0] else []
+        latest_uid = max(uids) if uids else 0
+        previous_uid = int(conn.get("last_uid") or 0)
+        store.update_mailbox_cursor(connection_id, latest_uid, status="ready", last_polled_at=utc_now())
+        return {
+            "connection_id": connection_id,
+            "previous_last_uid": previous_uid,
+            "latest_uid": latest_uid,
+            "synced_at": utc_now(),
+        }
+    finally:
+        try:
+            mail.logout()
+        except Exception:
+            pass
+
+
 def retrieve_mailbox_and_run(
     store: Store,
     connection_id: str,
     password: str | None = None,
-    mode: str = "auto"
+    mode: str = "auto",
+    since_time: str | datetime | None = None,
 ) -> dict[str, Any]:
     """Orchestrates retrieve -> import -> run pipeline.
 
@@ -359,6 +454,9 @@ def retrieve_mailbox_and_run(
     messages: list[dict[str, Any]] = []
     attachments: dict[str, bytes] = {}
     new_uid = last_uid
+
+    # Determine effective cutoff timestamp (explicit argument, or .env setting)
+    configured_since = since_time or _env_any("MAILBOX_SINCE", "LIVE_MAILBOX_SINCE", "EMAIL_SINCE")
 
     # An explicitly supplied password wins; otherwise resolve from environment.
     resolved_username, resolved_password = resolve_mailbox_credentials(conn)
@@ -390,6 +488,7 @@ def retrieve_mailbox_and_run(
                 folder=conn.get("folder", "INBOX"),
                 last_uid=last_uid,
                 max_count=10,
+                since_time=configured_since,
             )
             is_live = True
         except Exception as exc:
@@ -402,12 +501,14 @@ def retrieve_mailbox_and_run(
         messages, attachments, new_uid = generate_demo_inbound_batch(connection_id, last_uid)
 
     if not messages:
-        # No new messages above high-water mark
-        store.update_mailbox_cursor(connection_id, last_uid, status="idle", last_polled_at=utc_now())
+        # No new messages above high-water mark or cutoff
+        store.update_mailbox_cursor(connection_id, new_uid if new_uid > last_uid else last_uid, status="idle", last_polled_at=utc_now())
+        cutoff_msg = f" (filtered by cutoff: {configured_since})" if configured_since else ""
         return {
             "connection_id": connection_id,
             "new_count": 0,
-            "message": "Mailbox is up to date · No new messages found.",
+            "message": f"Mailbox is up to date · No new messages found{cutoff_msg}.",
+            "since_time": str(configured_since) if configured_since else None,
             "import_id": None,
             "run_id": None,
             "case_ids": [],
@@ -466,4 +567,5 @@ def retrieve_mailbox_and_run(
         "run_mode": run_mode,
         "high_water_mark": new_uid,
         "retrieved_at": now_str,
+        "since_time": str(configured_since) if configured_since else None,
     }

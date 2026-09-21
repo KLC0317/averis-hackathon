@@ -21,6 +21,7 @@ from .ingest import import_participant
 from .pipeline import _obs_from_dict, _result_json, run_import, verify_case
 from .readers import read_document
 from .store import PairSelectionError, StaleCaseVersionError, Store
+from .mailbox import _env_any
 
 try:
     from dotenv import load_dotenv
@@ -837,6 +838,7 @@ def create_app(db_path: str | None = None):
             "has_credentials": has_password,
             "has_address": "@" in effective_username,
             "mode": "live_imap" if ready else "demo_deterministic",
+            "configured_since": _env_any("MAILBOX_SINCE", "LIVE_MAILBOX_SINCE", "EMAIL_SINCE"),
         }
 
     @app.post("/api/v1/mailbox/{conn_id}/reset")
@@ -855,6 +857,23 @@ def create_app(db_path: str | None = None):
         store.update_mailbox_cursor(conn_id, 0, status="ready", last_polled_at=None)
         return {"connection_id": conn_id, "previous_last_uid": previous, "last_uid": 0}
 
+    @app.post("/api/v1/mailbox/{conn_id}/sync-latest")
+    @app.post("/mailbox/{conn_id}/sync-latest")
+    def sync_latest_mailbox(conn_id: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fast-forwards cursor to the highest existing UID in the mailbox.
+
+        Allows skipping historic messages so only emails received after this point
+        are retrieved.
+        """
+        from .mailbox import sync_mailbox_cursor_to_latest
+        body = body or {}
+        try:
+            return sync_mailbox_cursor_to_latest(store, conn_id, password=body.get("password"))
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(500, f"Sync failed: {exc}") from exc
+
     @app.post("/api/v1/mailbox/{conn_id}/retrieve")
     @app.post("/mailbox/{conn_id}/retrieve")
     def retrieve_mailbox(conn_id: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -866,6 +885,7 @@ def create_app(db_path: str | None = None):
                 connection_id=conn_id,
                 password=body.get("password"),
                 mode=body.get("mode", "auto"),
+                since_time=body.get("since_time"),
             )
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc

@@ -82,6 +82,18 @@ def main():
     if configured_username:
         print(f"       (connection row still stores the placeholder '{configured_username}' - "
               f"expected, since the .env value overrides it at read time)")
+    if status.get("configured_since"):
+        print(f"       [CUTOFF ACTIVE] Only retrieving emails received later than: {status.get('configured_since')}")
+
+    if "--sync-latest" in sys.argv:
+        print("\nFast-forwarding mailbox cursor to latest message in inbox...")
+        try:
+            sync_res = post("/mailbox/conn_gmail/sync-latest")
+            print(f"       Cursor set to latest UID {sync_res.get('latest_uid')} (previous was {sync_res.get('previous_last_uid')})")
+            print("       Historic emails will now be skipped; only emails arriving after this point will be retrieved.")
+        except Exception as exc:
+            print(f"       Sync failed: {exc}")
+        return 0
 
     if not all_ok:
         print("\nFix the items above before retrieving - a retrieve will fall back")
@@ -96,8 +108,13 @@ def main():
     # 3. Real retrieve attempt in strict live mode - raises rather than
     # silently substituting demo fixtures, so a failure here is informative.
     print("\nAttempting a live retrieve (mode=live, read-only IMAP EXAMINE)...")
+    payload = {"mode": "live"}
+    # Check for custom --since
+    for arg in sys.argv:
+        if arg.startswith("--since="):
+            payload["since_time"] = arg.split("=", 1)[1]
     try:
-        result = post("/mailbox/conn_gmail/retrieve", {"mode": "live"})
+        result = post("/mailbox/conn_gmail/retrieve", payload)
     except urllib.error.HTTPError as exc:
         body = exc.read().decode(errors="replace")
         check("POST /mailbox/conn_gmail/retrieve (mode=live)", False, f"HTTP {exc.code}: {body[:300]}")
@@ -108,6 +125,8 @@ def main():
 
     check("POST /mailbox/conn_gmail/retrieve (mode=live)", True)
     check("Server confirms this was a live IMAP fetch", bool(result.get("is_live_server")))
+    if result.get("since_time"):
+        print(f"       cutoff applied: emails strictly >= {result.get('since_time')}")
     print(f"       run_mode: {result.get('run_mode')}")
     print(f"       new_count: {result.get('new_count')}")
     print(f"       message: {result.get('message', '')}")

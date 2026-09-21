@@ -147,6 +147,16 @@ export default function LiveMailboxPage() {
     }
   };
 
+  const handleSyncLatest = async (connId: string) => {
+    try {
+      const res = await apiClient.syncLatestMailboxCursor(connId);
+      toast(`Fast-forwarded cursor to latest UID ${res.latest_uid} · historic mail skipped`, "success");
+      loadConnections();
+    } catch (err: any) {
+      toast(err?.message || "Failed to sync cursor", "warning");
+    }
+  };
+
   const handlePromoteBatch = async () => {
     const unpromoted = candidates.filter((c) => !c.is_promoted);
     if (unpromoted.length === 0) {
@@ -229,6 +239,15 @@ export default function LiveMailboxPage() {
               title="Rewind the UID cursor so already-ingested mail can be pulled again"
             >
               Reset cursor
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Clock size={15} />}
+              onClick={() => handleSyncLatest(selectedConnId)}
+              disabled={refreshing || retrieving}
+              title="Fast-forward cursor to latest inbox message, skipping all historic mail"
+            >
+              Skip past mail
             </Button>
             <Button
               variant="secondary"
@@ -448,6 +467,14 @@ export default function LiveMailboxPage() {
                         {conn.folder}
                       </span>
                     </div>
+                    {conn.configured_since && (
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "var(--ink-muted)" }}>Cutoff:</span>
+                        <span className="mono" style={{ color: "#10b981", fontSize: "11px", fontWeight: 600 }}>
+                          &ge; {conn.configured_since}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

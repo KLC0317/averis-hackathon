@@ -112,6 +112,7 @@ export interface MailboxConnection {
   status: string;
   last_uid?: number;
   last_polled_at?: string | null;
+  configured_since?: string | null;
 }
 
 export interface MailboxStatus extends MailboxConnection {
@@ -121,6 +122,7 @@ export interface MailboxStatus extends MailboxConnection {
   /** The placeholder stored on the connection row, when an env value overrode it. */
   configured_username?: string;
   mode: "live_imap" | "demo_deterministic";
+  configured_since?: string | null;
 }
 
 export interface MailboxRetrieveResult {
@@ -128,6 +130,8 @@ export interface MailboxRetrieveResult {
   import_id?: string | null;
   run_id?: string | null;
   new_count: number;
+  message?: string;
+  since_time?: string | null;
   case_ids: string[];
   cases: Array<{
     id: string;
@@ -138,7 +142,6 @@ export interface MailboxRetrieveResult {
     verification: string;
     updated_at: string;
   }>;
-  message?: string;
   is_live_server?: boolean;
   /** Which pipeline mode actually ran: "live_ai" when a DeepSeek key was
    * configured (the local gateway can escalate an unsure case to the model),
@@ -246,10 +249,12 @@ export interface ApiClient {
   /** Get live status and reachability for an IMAP connection. */
   getMailboxStatus(connId: string): Promise<MailboxStatus>;
   /** Fetch new emails from mailbox, import, and run verification. */
-  retrieveMailbox(connId: string, params?: { password?: string; mode?: "auto" | "demo" | "live" }): Promise<MailboxRetrieveResult>;
+  retrieveMailbox(connId: string, params?: { password?: string; mode?: "auto" | "demo" | "live"; since_time?: string }): Promise<MailboxRetrieveResult>;
   /** Rewind the IMAP UID high-water mark so already-ingested mail can be pulled
    * again. Needed to rehearse a demo; the mailbox itself is never modified. */
   resetMailboxCursor(connId: string): Promise<{ connection_id: string; previous_last_uid: number; last_uid: number }>;
+  /** Fast-forward cursor to latest inbox message to skip all historic mail. */
+  syncLatestMailboxCursor(connId: string): Promise<{ connection_id: string; previous_last_uid: number; latest_uid: number; synced_at: string }>;
   /** List chronological review and reinforcement events for audit inspection. */
   listAuditEvents(limit?: number): Promise<AuditEvent[]>;
   /** List all active taught equivalence conventions across the system. */
@@ -925,6 +930,12 @@ export function createApiClient(): ApiClient {
     },
     resetMailboxCursor: async (connId) => {
       return await request(`/mailbox/${encodeURIComponent(connId)}/reset`, { method: "POST" });
+    },
+    syncLatestMailboxCursor: async (connId: string) => {
+      return await request<{ connection_id: string; previous_last_uid: number; latest_uid: number; synced_at: string }>(
+        `/mailbox/${encodeURIComponent(connId)}/sync-latest`,
+        { method: "POST" }
+      );
     },
     listAuditEvents: async (limit?: number) => {
       return await request<AuditEvent[]>(`/audit/events?limit=${limit ?? 200}`);
