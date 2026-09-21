@@ -103,12 +103,56 @@ class Store:
             );
             """)
 
-    def create_import(self, source_mode: str, manifest_hash: str, *, issues: list[str] | None = None) -> str:
+    def get_or_create_import(self, source_mode: str, manifest_hash: str, *,
+                             issues: list[str] | None = None) -> tuple[str, bool]:
+        """Return the import for a manifest, creating it exactly once."""
         iid = str(uuid.uuid4())
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute("SELECT id FROM imports WHERE manifest_hash=? ORDER BY created_at LIMIT 1",
+                                  (manifest_hash,)).fetchone()
+            if existing:
+                return str(existing["id"]), False
             db.execute("INSERT INTO imports(id,source_mode,manifest_hash,created_at,status,issues_json) VALUES(?,?,?,?,?,?)",
                        (iid, source_mode, manifest_hash, utc_now(), "IMPORTED", json.dumps(issues or [])))
+        return iid, True
+
+    def create_import(self, source_mode: str, manifest_hash: str, *, issues: list[str] | None = None) -> str:
+        """Create an immutable import, reusing an identical manifest."""
+        iid, _ = self.get_or_create_import(source_mode, manifest_hash, issues=issues)
         return iid
+
+    def save_case_result_and_review_if_version(self, *, run_id: str | None, case_id: str,
+                                               category: str, classification: dict[str, Any],
+                                               result: dict[str, Any], verification: str,
+                                               action: str, field: str | None, side: str | None,
+                                               old_value: str | None, new_value: str | None,
+                                               reason: str | None, evidence: list[dict[str, Any]],
+                                               expected_version: int) -> tuple[bool, str | None]:
+        """Atomically apply a review result, version bump, and event.
+
+        Both the compare-and-set and append-only event belong to one SQLite
+        transaction.  A stale reviewer therefore cannot leave an event or an
+        assisted result behind after another reviewer wins the race.
+        """
+        event_id = str(uuid.uuid4())
+        with self.connect() as db:
+            cur = db.execute(
+                "UPDATE cases SET category=?,classification_json=?,processing=?,verification=?,result_json=?,updated_at=?,version=version+1 WHERE id=? AND version=?",
+                (category, json.dumps(classification), "SUCCEEDED", verification,
+                 json.dumps(result, ensure_ascii=False), utc_now(), case_id, expected_version),
+            )
+            if cur.rowcount != 1:
+                return False, None
+            for field_name, field_result in ((x["field"], x) for x in result.get("fields", [])):
+                db.execute("INSERT OR REPLACE INTO field_results(id,run_id,case_id,field,result_json) VALUES(?,?,?,?,?)",
+                           (str(uuid.uuid4()), run_id, case_id, field_name, json.dumps(field_result, ensure_ascii=False)))
+            db.execute(
+                "INSERT INTO review_events(id,case_id,run_id,action,field,side,old_value,new_value,reason,evidence_json,expected_version,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (event_id, case_id, run_id, action, field, side, old_value, new_value, reason,
+                 json.dumps(evidence, ensure_ascii=False), expected_version, utc_now()),
+            )
+        return True, event_id
 
     def add_email(self, import_id: str, email: dict[str, Any], content_hash: str) -> str:
         eid = str(uuid.uuid4())
