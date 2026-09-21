@@ -104,3 +104,69 @@ def test_report_contains_provenance_and_truthful_pending_claims(tmp_path: Path) 
     assert report["import_manifest_hash"]
     assert report["claims"]["organizer_score"] is None
     assert report["claims"]["human_study"] == "not_run"
+
+
+def test_review_revision_retry_stale_action_worker_restart_end_to_end(tmp_path: Path) -> None:
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    from cleardraft.api import create_app
+
+    db_path = str(tmp_path / "db.sqlite")
+    store = Store(db_path)
+    import_id = import_participant(_bundle(tmp_path / "participant"), store)
+    run_import(store, import_id)
+    case = store.list_cases(import_id)[0]
+    client = fastapi_testclient.TestClient(create_app(db_path))
+
+    # 1. Review action advances case version
+    v0 = case["version"]
+    review_resp = client.post(
+        f"/cases/{case['id']}/reviews",
+        json={"expected_case_version": v0, "action": "correct_reading", "field": "shipper", "side": "si", "corrected_reading": "Sender Co Revised"},
+    )
+    assert review_resp.status_code == 200, review_resp.text
+    v1 = review_resp.json()["case"]["version"]
+    assert v1 == v0 + 1
+
+    # 2. Stale action rejection (version mismatch returns 409)
+    stale_review = client.post(
+        f"/cases/{case['id']}/reviews",
+        json={"expected_case_version": v0, "action": "confirm_finding"},
+    )
+    assert stale_review.status_code == 409
+
+    # 3. Revision document upload advances version
+    doc_resp = client.post(
+        f"/cases/{case['id']}/documents",
+        files={"file": ("revision.txt", b"SHIPPING INSTRUCTION\nShipper: Sender Co Final\n", "text/plain")},
+        data={"expected_version": str(v1), "role_hint": "SI"},
+    )
+    assert doc_resp.status_code == 200, doc_resp.text
+    v2 = doc_resp.json()["case_version"]
+    assert v2 == v1 + 1
+
+    # 4. Stale revision document upload rejected (409)
+    stale_doc = client.post(
+        f"/cases/{case['id']}/documents",
+        files={"file": ("stale.txt", b"later", "text/plain")},
+        data={"expected_version": str(v1), "role_hint": "SI"},
+    )
+    assert stale_doc.status_code == 409
+
+    # 5. Worker restart: tear down client and instantiate fresh app from persistent store
+    del client
+    restarted_client = fastapi_testclient.TestClient(create_app(db_path))
+    recovered_case = restarted_client.get(f"/cases/{case['id']}").json()
+    assert recovered_case["version"] == v2
+    history = restarted_client.get(f"/cases/{case['id']}/history").json()
+    assert history["current_version"] == v2
+    assert len(history["review_events"]) >= 1
+    assert any("Sender Co Revised" in str(e.get("new_value", "")) for e in history["review_events"])
+
+    # 6. Retry review on restarted worker with valid fresh version v2
+    retry_review = restarted_client.post(
+        f"/cases/{case['id']}/reviews",
+        json={"expected_case_version": v2, "action": "confirm_finding"},
+    )
+    assert retry_review.status_code == 200, retry_review.text
+    assert retry_review.json()["case"]["version"] == v2 + 1
+
