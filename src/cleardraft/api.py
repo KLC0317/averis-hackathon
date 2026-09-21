@@ -325,19 +325,15 @@ def create_app(db_path: str | None = None):
             compared = compare_documents(si, bl, category=case.get("category") or "BL_COMPARISON", issues=result.get("issues", []))
             new_result = _result_json(compared)
         digest = hashlib.sha256(json.dumps(new_result, sort_keys=True).encode()).hexdigest()
-        run_id = store.create_run(case["import_id"], "assisted_review", digest, "review-v1")
-        if field_name:
-            store.complete_run(run_id, {case["email_id"]: compared.to_submission()})
-        else:
-            store.complete_run(run_id, {case["email_id"]: {"status": "REVIEWED"}})
-        applied, event_id = store.save_case_result_and_review_if_version(
-            run_id=run_id, case_id=case_id, category=case.get("category") or "BL_COMPARISON",
-            classification=case.get("classification") or {}, result=new_result,
-            verification=new_result.get("verification", case.get("verification") or "NEEDS_REVIEW"),
-            action=action, field=field_name, side=side, old_value=old_value,
-            new_value=body.get("corrected_reading", body.get("correctedReading")),
+        aggregate = compared.to_submission() if field_name else {"status": "REVIEWED"}
+        applied, run_id, event_id = store.apply_review_transaction(
+            import_id=case["import_id"], email_id=case["email_id"], case_id=case_id,
+            category=case.get("category") or "BL_COMPARISON", classification=case.get("classification") or {},
+            result=new_result, verification=new_result.get("verification", case.get("verification") or "NEEDS_REVIEW"),
+            expected_version=expected, action=action, field=field_name, side=side,
+            old_value=old_value, new_value=body.get("corrected_reading", body.get("correctedReading")),
             reason=body.get("reason"), evidence=body.get("evidence_refs", body.get("evidenceRefs", [])),
-            expected_version=expected,
+            input_hash=digest, policy_version="review-v1", aggregate=aggregate,
         )
         if not applied:
             raise HTTPException(409, detail={"code": "stale_case", "current_version": (store.get_case(case_id) or {}).get("version")})

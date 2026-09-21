@@ -179,6 +179,58 @@ class Store:
             )
         return True, event_id
 
+    def apply_review_transaction(
+        self, *, import_id: str, email_id: str, case_id: str, category: str,
+        classification: dict[str, Any], result: dict[str, Any], verification: str,
+        expected_version: int, action: str, field: str | None, side: str | None,
+        old_value: str | None, new_value: str | None, reason: str | None,
+        evidence: list[dict[str, Any]], mode: str = "assisted_review",
+        input_hash: str, policy_version: str, aggregate: dict[str, Any],
+    ) -> tuple[bool, str | None, str | None]:
+        """Atomically create an assisted run, apply the current case, and log review.
+
+        The case version is checked under an immediate SQLite transaction before any
+        dependent rows are written. A stale reviewer therefore leaves no orphan run,
+        field results, or review event behind.
+        """
+        run_id = str(uuid.uuid4())
+        event_id = str(uuid.uuid4())
+        now = utc_now()
+        run_result = {email_id: aggregate}
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                "SELECT import_id,version FROM cases WHERE id=?", (case_id,)
+            ).fetchone()
+            if not current or current["import_id"] != import_id or int(current["version"]) != int(expected_version):
+                return False, None, None
+            db.execute(
+                "INSERT INTO runs(id,import_id,mode,status,created_at,completed_at,result_json,input_hash,policy_version) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (run_id, import_id, mode, "SUCCEEDED", now, now,
+                 json.dumps(run_result, ensure_ascii=False), input_hash, policy_version),
+            )
+            updated = db.execute(
+                "UPDATE cases SET category=?,classification_json=?,processing=?,verification=?,result_json=?,updated_at=?,version=version+1 "
+                "WHERE id=? AND version=?",
+                (category, json.dumps(classification), str(result.get("processing", "SUCCEEDED")), verification,
+                 json.dumps(result, ensure_ascii=False), now, case_id, expected_version),
+            )
+            if updated.rowcount != 1:
+                return False, None, None
+            for field_name, field_result in ((x["field"], x) for x in result.get("fields", [])):
+                db.execute(
+                    "INSERT OR REPLACE INTO field_results(id,run_id,case_id,field,result_json) VALUES(?,?,?,?,?)",
+                    (str(uuid.uuid4()), run_id, case_id, field_name, json.dumps(field_result, ensure_ascii=False)),
+                )
+            db.execute(
+                "INSERT INTO review_events(id,case_id,run_id,action,field,side,old_value,new_value,reason,evidence_json,expected_version,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (event_id, case_id, run_id, action, field, side, old_value, new_value, reason,
+                 json.dumps(evidence, ensure_ascii=False), expected_version, now),
+            )
+        return True, run_id, event_id
+
     def add_email(self, import_id: str, email: dict[str, Any], content_hash: str) -> str:
         eid = str(uuid.uuid4())
         with self.connect() as db:
