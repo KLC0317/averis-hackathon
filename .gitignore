@@ -10,12 +10,16 @@ htmlcov/
 .venv/
 venv/
 
-# Node / Vite
+# Node / Vite / Next.js
 node_modules/
 dist/
 .vite/
+.next/
+*.tsbuildinfo
 
 # Local configuration and runtime artifacts
+.tmp-tests/
+.claude/
 .env
 .env.*
 !.env.example
