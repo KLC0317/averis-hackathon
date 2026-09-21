@@ -381,8 +381,10 @@ class Store:
         current = now or utc_now()
         with self.connect() as db:
             cur = db.execute(
-                "UPDATE jobs SET status='QUEUED', lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, "
-                "available_at=?, updated_at=? WHERE status='RUNNING' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
+                "UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'FAILED' ELSE 'QUEUED' END, "
+                "last_error=CASE WHEN attempts>=max_attempts THEN COALESCE(last_error, 'lease expired') ELSE last_error END, "
+                "lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, available_at=?, updated_at=? "
+                "WHERE status='RUNNING' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
                 (current, current, current),
             )
             return cur.rowcount
@@ -396,7 +398,9 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
-                "UPDATE jobs SET status='QUEUED', lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, available_at=?, updated_at=? "
+                "UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'FAILED' ELSE 'QUEUED' END, "
+                "last_error=CASE WHEN attempts>=max_attempts THEN COALESCE(last_error, 'lease expired') ELSE last_error END, "
+                "lease_owner=NULL, lease_expires_at=NULL, heartbeat_at=NULL, available_at=?, updated_at=? "
                 "WHERE status='RUNNING' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
                 (current, current, current),
             )
