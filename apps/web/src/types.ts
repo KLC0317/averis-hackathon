@@ -54,14 +54,55 @@ export interface Arbitration {
   options: ArbitrationOption[];
 }
 
+export interface DocumentReference {
+  id?: string;
+  name: string;
+  version: string;
+  updated: string;
+  format?: string;
+  size?: number;
+}
+
+export interface ReviewEvent {
+  id: string;
+  caseId?: string;
+  runId?: string | null;
+  action: string;
+  field?: string | null;
+  side?: string | null;
+  oldValue?: string | null;
+  newValue?: string | null;
+  reason?: string | null;
+  evidence?: Array<Record<string, unknown>>;
+  expectedVersion?: number;
+  createdAt: string;
+}
+
+export interface SourcePreviewBlock {
+  blockId: string;
+  text: string;
+  locator: Record<string, unknown>;
+  kind?: string;
+}
+
+export interface SourcePreview {
+  sha256?: string;
+  filename?: string;
+  detectedFormat?: string;
+  blocks: SourcePreviewBlock[];
+  warnings?: string[];
+  error?: string | null;
+}
+
 export interface CaseDetail extends CaseSummary {
   arbitration?: Arbitration | null;
-  siDocument: { name: string; version: string; updated: string };
-  blDocument: { name: string; version: string; updated: string };
+  siDocument: DocumentReference;
+  blDocument: DocumentReference;
   fields: FieldFinding[];
   siSource: string[];
   blSource: string[];
   reviewQuestion?: string;
+  reviewEvents?: ReviewEvent[];
 }
 
 export interface ImportRecord {
