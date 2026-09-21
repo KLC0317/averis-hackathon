@@ -1,32 +1,135 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, CheckCircle2, Download, FileInput, RefreshCw, TriangleAlert, Upload } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import {
-  ArrowLeft, CheckCircle2, Download, FileInput, TriangleAlert, Upload
-} from "lucide-react";
-import { caseDetails as initialCaseDetails } from "../../../../data/mockData";
+import { caseDetails as fixtureCaseDetails } from "../../../../data/mockData";
+import type { CaseDetail, ReviewEvent } from "../../../../types";
+import { apiClient } from "../../../../api/client";
 import { useToast } from "../../../../components/Toast";
-import { Button } from "../../../../components/UI";
+import { Button, StatusBadge } from "../../../../components/UI";
+
+function formatEventTime(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function actionLabel(action: string) {
+  return action
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function eventDescription(event: ReviewEvent) {
+  const field = event.field ? ` for ${event.field.replace(/_/g, " ")}` : "";
+  if (event.oldValue || event.newValue) {
+    return `${event.oldValue ?? "No previous value"} → ${event.newValue ?? "No replacement value"}${event.reason ? ` · ${event.reason}` : ""}`;
+  }
+  return event.reason || `Recorded ${actionLabel(event.action).toLowerCase()}${field}.`;
+}
+
+function eventIcon(event: ReviewEvent) {
+  if (event.action.includes("resolve") || event.action.includes("confirm")) {
+    return <CheckCircle2 size={15} className="success-text" />;
+  }
+  if (event.action.includes("cannot") || event.action.includes("retry")) {
+    return <TriangleAlert size={15} className="warning-text" />;
+  }
+  if (event.action.includes("document") || event.action.includes("pair")) {
+    return <Upload size={15} style={{ color: "var(--primary)" }} />;
+  }
+  return <FileInput size={15} style={{ color: "var(--ink-faint)" }} />;
+}
 
 export default function HistoryPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
 
-  const id = (params?.id as string) || "case-1042";
-  const detail = initialCaseDetails[id] ?? initialCaseDetails["case-1042"];
+  const requestedId = (params?.id as string) || "case-1042";
+  const fixture = fixtureCaseDetails[requestedId] ?? fixtureCaseDetails["case-1042"];
+  const [detail, setDetail] = useState<CaseDetail>(fixture);
+  const [events, setEvents] = useState<ReviewEvent[]>([]);
+  const [liveConnected, setLiveConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadHistory = (announce = false) => {
+    setRefreshing(true);
+    return apiClient
+      .getCase(requestedId)
+      .then((live) => {
+        setDetail(live);
+        setEvents(live.reviewEvents ?? []);
+        setLiveConnected(true);
+        if (announce) toast("Audit history refreshed from the API", "success");
+      })
+      .catch(() => {
+        // Offline mode is deliberate: never invent audit events when the API
+        // cannot be reached. The fixture is clearly labelled below instead.
+        setDetail(fixture);
+        setEvents([]);
+        setLiveConnected(false);
+        if (announce) toast("API unavailable · showing fixture metadata; no audit events were inferred", "warning");
+      })
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiClient
+      .getCase(requestedId)
+      .then((live) => {
+        if (cancelled) return;
+        setDetail(live);
+        setEvents(live.reviewEvents ?? []);
+        setLiveConnected(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDetail(fixture);
+        setEvents([]);
+        setLiveConnected(false);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedId]);
+
+  const eventCountLabel = useMemo(() => `${events.length} recorded event${events.length === 1 ? "" : "s"}`, [events.length]);
 
   const handleExportAudit = () => {
-    const jsonStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(detail, null, 2));
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      source: liveConnected ? "api" : "offline_fixture",
+      case: detail,
+      reviewEvents: events
+    };
+    const jsonStr = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payload, null, 2));
     const downloadAnchor = document.createElement("a");
     downloadAnchor.setAttribute("href", jsonStr);
     downloadAnchor.setAttribute("download", `${detail.id}_audit_trail.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    toast("Audit log history exported successfully", "success");
+    toast(liveConnected ? "API audit log exported" : "Offline fixture metadata exported; no live events included", liveConnected ? "success" : "warning");
   };
+
+  if (loading) {
+    return (
+      <div className="content-wrap">
+        <div className="card" style={{ padding: "28px", color: "var(--ink-muted)" }}>Loading audit history from the API…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="content-wrap">
@@ -36,171 +139,97 @@ export default function HistoryPage() {
             <ArrowLeft size={14} /> Back to case workspace
           </button>
           <h1 style={{ fontSize: "24px", fontWeight: 800 }}>Audit History</h1>
-          <div
-            style={{
-              display: "flex",
-              gap: "10px",
-              fontSize: "12px",
-              color: "var(--ink-muted)",
-              marginTop: "4px"
-            }}
-          >
-            <span className="mono" style={{ color: "var(--primary)", fontWeight: 600 }}>
-              {detail.emailId}
-            </span>
+          <div style={{ display: "flex", gap: "10px", fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px" }}>
+            <span className="mono" style={{ color: "var(--primary)", fontWeight: 600 }}>{detail.emailId}</span>
             <span>·</span>
             <span>{detail.subject}</span>
           </div>
         </div>
 
-        <Button variant="primary" icon={<Download size={15} />} onClick={handleExportAudit}>
-          Export audit log
-        </Button>
+        <div className="page-actions">
+          <Button
+            variant="secondary"
+            icon={<RefreshCw size={15} className={refreshing ? "spin" : undefined} />}
+            onClick={() => loadHistory(true)}
+            disabled={refreshing}
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </Button>
+          <Button variant="primary" icon={<Download size={15} />} onClick={handleExportAudit}>
+            Export audit log
+          </Button>
+        </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.3fr 0.7fr",
-          gap: "20px",
-          marginTop: "10px"
-        }}
-      >
+      {!liveConnected && (
+        <div className="callout" style={{ marginBottom: 20 }}>
+          <TriangleAlert size={16} />
+          <span>API unavailable — showing local fixture metadata. Audit events are not available offline and were not fabricated.</span>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 0.7fr", gap: "20px", marginTop: "10px" }}>
         <div className="card">
           <div className="card-heading">
             <div>
-              <span className="eyebrow">APPEND-ONLY AUDIT EVENTS</span>
-              <h3>Decision & Parser History</h3>
+              <span className="eyebrow">APPEND-ONLY REVIEW EVENTS</span>
+              <h3>Decision &amp; Parser History</h3>
             </div>
-            <span className="status-badge info">4 recorded events</span>
+            <span className={`status-badge ${liveConnected ? "info" : "muted"}`}>{eventCountLabel}</span>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "18px", marginTop: "16px" }}>
-            {[
-              {
-                time: "Today, 09:43",
-                title: "Review opened",
-                meta: "task_291 · Reviewer assigned",
-                desc: "Consignee legal name differs between SI v2 and BL v1. Targeted question generated.",
-                icon: <TriangleAlert size={15} className="warning-text" />
-              },
-              {
-                time: "Today, 09:42",
-                title: "Machine comparison completed",
-                meta: "run_8f31 · deterministic-rules-v0.3",
-                desc: "Seven fields compared against SI v2 and BL v1. One confirmed mismatch detected.",
-                icon: <CheckCircle2 size={15} className="success-text" />
-              },
-              {
-                time: "Today, 09:40",
-                title: "BL Document ingested",
-                meta: "version v1 · SHA-256 04c3a8",
-                desc: "Raw source PDF parsed and indexed into immutable local storage.",
-                icon: <Upload size={15} style={{ color: "var(--primary)" }} />
-              },
-              {
-                time: "Today, 09:40",
-                title: "Case record created",
-                meta: "imp_20240918_01 · Inbound classification",
-                desc: "Email categorized as BL comparison with 98.4% confidence score.",
-                icon: <FileInput size={15} style={{ color: "var(--ink-faint)" }} />
-              }
-            ].map((evt, i) => (
-              <div key={i} style={{ display: "flex", gap: "14px" }}>
-                <div
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    borderRadius: "var(--radius-full)",
-                    background: "var(--bg-subtle)",
-                    display: "grid",
-                    placeItems: "center",
-                    flexShrink: 0
-                  }}
-                >
-                  {evt.icon}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <strong style={{ fontSize: "13px", color: "var(--ink-primary)" }}>
-                      {evt.title}
-                    </strong>
-                    <span className="mono" style={{ fontSize: "11px", color: "var(--ink-faint)" }}>
-                      {evt.time}
-                    </span>
+          {events.length === 0 ? (
+            <div style={{ marginTop: "18px", padding: "18px", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", color: "var(--ink-muted)", fontSize: "12px" }}>
+              {liveConnected
+                ? "The API has not recorded a review event for this case yet. Import, parser, and comparison milestones are not guessed here."
+                : "No live audit events can be loaded while offline. Reconnect to the API to inspect the append-only event stream."}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "18px", marginTop: "16px" }}>
+              {events.map((event) => (
+                <div key={event.id} style={{ display: "flex", gap: "14px" }}>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "var(--radius-full)", background: "var(--bg-subtle)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                    {eventIcon(event)}
                   </div>
-                  <span style={{ fontSize: "11px", color: "var(--ink-faint)" }}>{evt.meta}</span>
-                  <p style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px" }}>
-                    {evt.desc}
-                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: "13px", color: "var(--ink-primary)" }}>{actionLabel(event.action)}</strong>
+                      <span className="mono" style={{ fontSize: "11px", color: "var(--ink-faint)" }}>{formatEventTime(event.createdAt)}</span>
+                    </div>
+                    <span className="mono" style={{ fontSize: "11px", color: "var(--ink-faint)" }}>
+                      {event.id.slice(0, 12)}{event.runId ? ` · run ${event.runId.slice(0, 12)}` : ""}
+                    </span>
+                    <p style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px", overflowWrap: "anywhere" }}>{eventDescription(event)}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div className="card-heading">
             <h3>Document Pair</h3>
-            <span className="status-badge success">Verified</span>
+            {liveConnected ? <StatusBadge status={detail.state} /> : <span className="status-badge muted">Offline fixture</span>}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <div
-              style={{
-                padding: "12px",
-                background: "var(--bg-subtle)",
-                borderRadius: "var(--radius-md)",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center"
-              }}
-            >
-              <div>
-                <strong style={{ fontSize: "12px", display: "block" }}>
-                  {detail.siDocument.name}
-                </strong>
-                <span className="mono" style={{ fontSize: "11px", color: "var(--primary)" }}>
-                  {detail.siDocument.version}
-                </span>
+            {[{ label: "SI reference", document: detail.siDocument }, { label: "Draft BL", document: detail.blDocument }].map(({ label, document }) => (
+              <div key={label} style={{ padding: "12px", background: "var(--bg-subtle)", borderRadius: "var(--radius-md)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ fontSize: "12px", display: "block", overflowWrap: "anywhere" }}>{label}: {document.name}</strong>
+                  <span className="mono" style={{ fontSize: "11px", color: label === "SI reference" ? "var(--primary)" : "var(--purple)" }}>{document.version}</span>
+                  <span style={{ display: "block", fontSize: "11px", color: "var(--ink-faint)", marginTop: "3px" }}>{document.updated}</span>
+                </div>
+                {liveConnected ? <CheckCircle2 size={16} style={{ color: "var(--ink-faint)", flexShrink: 0 }} /> : <TriangleAlert size={16} className="warning-text" style={{ flexShrink: 0 }} />}
               </div>
-              <CheckCircle2 size={16} className="success-text" />
-            </div>
-
-            <div
-              style={{
-                padding: "12px",
-                background: "var(--bg-subtle)",
-                borderRadius: "var(--radius-md)",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center"
-              }}
-            >
-              <div>
-                <strong style={{ fontSize: "12px", display: "block" }}>
-                  {detail.blDocument.name}
-                </strong>
-                <span className="mono" style={{ fontSize: "11px", color: "var(--purple)" }}>
-                  {detail.blDocument.version}
-                </span>
-              </div>
-              <CheckCircle2 size={16} className="success-text" />
-            </div>
+            ))}
           </div>
 
-          <div
-            style={{
-              padding: "12px",
-              background: "var(--info-subtle)",
-              borderRadius: "var(--radius-md)",
-              border: "1px solid var(--info-border)",
-              fontSize: "12px",
-              color: "var(--info-text)"
-            }}
-          >
-            Document changes immediately spawn a new seven-field comparison run. Historical reviews
-            remain pinned to their exact source hashes.
+          <div style={{ padding: "12px", background: "var(--info-subtle)", borderRadius: "var(--radius-md)", border: "1px solid var(--info-border)", fontSize: "12px", color: "var(--info-text)" }}>
+            {liveConnected
+              ? "Pair and source metadata are read from the case API. Historical review events remain pinned to the versions recorded by the server."
+              : "These document details come from the local fixture only. Reconnect before treating the pair or versions as authoritative."}
           </div>
         </div>
       </div>
