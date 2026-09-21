@@ -65,8 +65,14 @@ def _pair_documents(docs: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, 
     # wrong-document case. Do not let a `_BL` filename override its content.
     if not bls and any(r == DocumentRole.OTHER for _, r in identified):
         issues.append("wrong document type detected")
-    if len(sis) > 1 or len(bls) > 1:
-        issues.append("multiple plausible document versions; first deterministic pair selected")
+    # Never silently choose among multiple plausible versions.  A reviewer must
+    # explicitly pair the intended revisions before comparison can proceed.
+    if len(sis) > 1:
+        issues.append("multiple plausible SI document versions; explicit pair selection required")
+        sis = []
+    if len(bls) > 1:
+        issues.append("multiple plausible draft BL document versions; explicit pair selection required")
+        bls = []
     if not sis: issues.append("missing SI document")
     if not bls: issues.append("missing draft BL document")
     return (sis[0] if sis else None), (bls[0] if bls else None), issues

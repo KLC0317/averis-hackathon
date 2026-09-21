@@ -214,7 +214,9 @@ def route_local(classification: dict[str, Any], policy: GatewayPolicy) -> Gatewa
     """First gate: accept a confident deterministic reading, or escalate."""
     category = classification["category"]
     confidence = float(classification.get("confidence") or 0.0)
-    accepted = confidence >= policy.local_accept
+    # A classifier may explicitly mark its answer for review even when its
+    # numeric score is high.  Never let the score override that contract flag.
+    accepted = confidence >= policy.local_accept and not bool(classification.get("requires_review", False))
     return GatewayDecision(
         tier=Tier.LOCAL_RULES,
         disposition=Disposition.ACCEPTED if accepted else Disposition.ESCALATED,

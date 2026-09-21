@@ -15,6 +15,15 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
+class StaleCaseVersionError(RuntimeError):
+    """The caller's optimistic case version no longer identifies current state."""
+
+
+class PairSelectionError(ValueError):
+    """The requested document pair does not belong to the case."""
+
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -375,6 +384,67 @@ class Store:
             else:
                 rows = db.execute("SELECT * FROM documents WHERE import_id=? ORDER BY email_id,attachment_path", (import_id,)).fetchall()
         return [dict(x) for x in rows]
+
+    def select_pair(self, *, case_id: str, si_document_id: str | None,
+                    bl_document_id: str | None, selected_by: str,
+                    expected_version: int) -> tuple[str, int]:
+        """Validate and atomically select a document pair for a case.
+
+        Ownership and content-derived roles are checked inside the same
+        transaction as the optimistic version update.  A stale update or any
+        validation failure therefore leaves no orphaned pair row behind.
+        """
+        if not si_document_id or not bl_document_id:
+            raise PairSelectionError("si_document_id and bl_document_id are required")
+        if si_document_id == bl_document_id:
+            raise PairSelectionError("SI and draft BL documents must be different")
+        from .core import DocumentRole, identify_document_role
+        from .readers import read_document
+
+        with self.connect() as db:
+            case = db.execute("SELECT import_id,email_id,version FROM cases WHERE id=?", (case_id,)).fetchone()
+            if not case:
+                raise PairSelectionError("case not found")
+            if int(case["version"]) != int(expected_version):
+                error = StaleCaseVersionError("stale case")
+                error.current_version = int(case["version"])  # type: ignore[attr-defined]
+                raise error
+            rows = db.execute(
+                "SELECT id,import_id,email_id,filename,bytes FROM documents "
+                "WHERE id IN (?,?)", (si_document_id, bl_document_id),
+            ).fetchall()
+            by_id = {row["id"]: row for row in rows}
+            if len(by_id) != 2:
+                raise PairSelectionError("selected document not found")
+            for document_id, expected_role in (
+                (si_document_id, DocumentRole.SI), (bl_document_id, DocumentRole.DRAFT_BL),
+            ):
+                row = by_id[document_id]
+                if row["import_id"] != case["import_id"] or row["email_id"] != case["email_id"]:
+                    raise PairSelectionError("selected document does not belong to case")
+                read = read_document(row["bytes"], row["filename"])
+                role = identify_document_role(read.text, row["filename"])
+                if role is not expected_role:
+                    raise PairSelectionError(
+                        f"{document_id} is not a {expected_role.value} document (detected {role.value})",
+                    )
+            now = utc_now()
+            pair_id = str(uuid.uuid4())
+            db.execute(
+                "INSERT INTO comparison_pairs(id,case_id,si_document_id,bl_document_id,selected_by,case_version,created_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (pair_id, case_id, si_document_id, bl_document_id, selected_by or "reviewer", expected_version, now),
+            )
+            updated = db.execute(
+                "UPDATE cases SET version=version+1,updated_at=? WHERE id=? AND version=?",
+                (now, case_id, expected_version),
+            )
+            if updated.rowcount != 1:
+                error = StaleCaseVersionError("stale case")
+                current = db.execute("SELECT version FROM cases WHERE id=?", (case_id,)).fetchone()
+                error.current_version = int(current["version"]) if current else None  # type: ignore[attr-defined]
+                raise error
+            return pair_id, expected_version + 1
 
     def latest_run(self, import_id: str) -> dict[str, Any] | None:
         with self.connect() as db:

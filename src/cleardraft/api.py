@@ -18,7 +18,7 @@ from .export import export_run
 from .ingest import import_participant
 from .pipeline import _obs_from_dict, _result_json, run_import, verify_case
 from .readers import read_document
-from .store import Store
+from .store import PairSelectionError, StaleCaseVersionError, Store
 
 try:
     from dotenv import load_dotenv
@@ -327,13 +327,23 @@ def create_app(db_path: str | None = None):
         expected = int(body.get("expected_case_version", body.get("expectedCaseVersion", -1)))
         if expected != case["version"]:
             raise HTTPException(409, "stale case")
-        pair_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
-        with store.connect() as db:
-            db.execute("INSERT INTO comparison_pairs(id,case_id,si_document_id,bl_document_id,selected_by,case_version,created_at) VALUES(?,?,?,?,?,?,?)",
-                       (pair_id, case_id, body.get("si_document_id"), body.get("bl_document_id"), body.get("selected_by", "reviewer"), expected, now))
-            db.execute("UPDATE cases SET version=version+1,updated_at=? WHERE id=? AND version=?", (now, case_id, expected))
-        return {"pair_id": pair_id, "case_version": expected + 1}
+        try:
+            pair_id, case_version = store.select_pair(
+                case_id=case_id,
+                si_document_id=body.get("si_document_id"),
+                bl_document_id=body.get("bl_document_id"),
+                selected_by=str(body.get("selected_by", "reviewer")),
+                expected_version=expected,
+            )
+        except StaleCaseVersionError as exc:
+            detail = {"code": "stale_case"}
+            current_version = getattr(exc, "current_version", None)
+            if current_version is not None:
+                detail["current_version"] = current_version
+            raise HTTPException(409, detail=detail) from exc
+        except PairSelectionError as exc:
+            raise HTTPException(400, detail={"code": "invalid_pair", "message": str(exc)}) from exc
+        return {"pair_id": pair_id, "case_version": case_version}
 
     @app.post("/api/v1/cases/{case_id}/arbitration")
     @app.post("/cases/{case_id}/arbitration")
