@@ -7,6 +7,7 @@ import unicodedata
 from dataclasses import dataclass, field, asdict
 from decimal import Decimal, InvalidOperation
 from enum import Enum
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 CATEGORIES = ("BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM")
@@ -598,9 +599,10 @@ def identify_document_role(text: str, filename: str = "") -> DocumentRole:
         return DocumentRole.DRAFT_BL
     # Content is inconclusive; honor a suffix only as a weak hint.
     name = filename.casefold()
-    if "_si" in name or name.endswith("si.txt"):
+    stem = Path(filename).stem.casefold()
+    if "_si" in name or stem == "si" or stem.endswith("_si"):
         return DocumentRole.SI
-    if "_bl" in name or name.endswith("bl.txt"):
+    if "_bl" in name or stem == "bl" or stem.endswith("_bl"):
         return DocumentRole.DRAFT_BL
     return DocumentRole.UNKNOWN
 

@@ -56,11 +56,16 @@ def _pair_documents(docs: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, 
         identified.append((doc, role))
     sis = [d for d, r in identified if r == DocumentRole.SI]
     bls = [d for d, r in identified if r == DocumentRole.DRAFT_BL]
+    def _hint(fn: str, role_suffix: str) -> bool:
+        lower = fn.casefold()
+        stem = Path(fn).stem.casefold()
+        return f"_{role_suffix}" in lower or stem == role_suffix or stem.endswith(f"_{role_suffix}")
+
     if not sis:
         # A filename hint can select a document only when content was inconclusive.
-        sis = [d for d, r in identified if r == DocumentRole.UNKNOWN and "_si" in d["filename"].casefold()]
+        sis = [d for d, r in identified if r == DocumentRole.UNKNOWN and _hint(d["filename"], "si")]
     if not bls:
-        bls = [d for d, r in identified if r == DocumentRole.UNKNOWN and "_bl" in d["filename"].casefold()]
+        bls = [d for d, r in identified if r == DocumentRole.UNKNOWN and _hint(d["filename"], "bl")]
     # An attachment that positively identifies as another document type is a
     # wrong-document case. Do not let a `_BL` filename override its content.
     if not bls and any(r == DocumentRole.OTHER for _, r in identified):
@@ -155,8 +160,14 @@ def verify_case(docs: list[dict[str, Any]], email: dict[str, Any], category: str
 
     si_read = read_document(si_doc["bytes"], si_doc["filename"])
     bl_read = read_document(bl_doc["bytes"], bl_doc["filename"])
-    if si_read.error or bl_read.error:
-        result = compare_documents({}, {}, processing="FAILED", issues=issues + [x for x in (si_read.error, bl_read.error) if x])
+    if si_read.error or bl_read.error or not si_read.blocks or not bl_read.blocks:
+        processing = "FAILED" if (si_read.error or bl_read.error) else "SUCCEEDED"
+        reader_issues = [x for x in (si_read.error, bl_read.error) if x] + si_read.warnings + bl_read.warnings
+        if not si_read.blocks and "missing SI readable content" not in reader_issues:
+            reader_issues.append("missing SI readable content")
+        if not bl_read.blocks and "missing draft BL readable content" not in reader_issues:
+            reader_issues.append("missing draft BL readable content")
+        result = compare_documents({}, {}, processing=processing, issues=issues + reader_issues)
         result.review_reason = "unreadable"
         return result
 
