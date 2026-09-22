@@ -50,6 +50,47 @@ docker compose up --build
 Open `http://localhost:5173`. The optional organizer evaluator is a separate
 profile and port: `docker compose --profile organizer up --build organizer`.
 
+## Technical architecture
+
+ClearDraft has three runtime processes: a Next.js web client, a FastAPI API,
+and a persisted worker. The API and worker share SQLite and an immutable
+local storage root; jobs are claimed atomically with bounded retries and
+lease expiry, so a page refresh or worker restart never erases source
+evidence.
+
+Pipeline stages:
+
+1. Import and hash immutable email and attachment bytes.
+2. Classify each email into one of five organizer categories through the
+   classification gateway (below).
+3. Detect document roles from content and evidence, with filename suffixes
+   only as weak hints.
+4. Read TXT, native/scanned PDF, DOCX, and XLSX sources into evidence blocks.
+5. Extract SI and BL independently, normalize the seven required fields, and
+   compare them with exact field-specific rules.
+6. Aggregate machine results into processing, verification, and operational
+   states without collapsing missing values into zeros or mismatches.
+7. Expose review tasks, revisions, drafts, challenge runs, reports, and
+   strict machine-only or assisted exports.
+
+The private evaluator sits outside this pipeline: `ground_truth.json` and
+generator internals are never inputs to classification, extraction, prompts,
+or challenge fixtures.
+
+**Classification gateway.** `src/cleardraft/gateway.py` routes every email
+through three tiers instead of a single confidence threshold: a deterministic
+keyword/regex scorer runs first (`classify_email()`), then an optional model
+second opinion, then human arbitration as the terminal tier. Agreement
+between the two automated tiers is accepted outright; the model overriding a
+local reading that had no real signal is accepted; but a genuine disagreement
+where both tiers had real evidence is never resolved automatically - it
+becomes a human arbitration case with the competing evidence and the stated
+consequence of each choice. Model confidence is derived from verifiable
+signals (whether a cited evidence quote can be located in the source text),
+not self-reported by the model. See [`docs/architecture.md`](docs/architecture.md)
+for the full design and [`docs/reliability.md`](docs/reliability.md) for the
+measured regression this gateway exists to catch.
+
 ## Written responses
 
 This section answers the written-response questions from the submission FAQ.
