@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { apiClient, getCachedCases, getCachedMetrics, setCachedCases, setCachedMetrics } from "../api/client";
 
 const WARMUP_SESSION_KEY = "cleardraft:initial-warmup-v1";
+const WARMUP_DURATION_MS = 5000;
 const WARMUP_ROUTES = ["/inbox", "/todo", "/imports", "/live", "/evaluation", "/rl-audit", "/settings"];
 
 let warmupPromise: Promise<void> | null = null;
@@ -47,6 +48,7 @@ function warmSharedResources(router: ReturnType<typeof useRouter>): Promise<void
 }
 
 export function InitialAppWarmup() {
+  const pathname = usePathname();
   const router = useRouter();
   const [status, setStatus] = useState<"checking" | "loading" | "ready">("checking");
 
@@ -60,8 +62,10 @@ export function InitialAppWarmup() {
       // Storage can be unavailable in private browsing; the in-memory flow still works.
     }
 
-    if (hasSnapshot || sessionReady) {
+    const firstVisit = !hasSnapshot && !sessionReady;
+    if (!firstVisit) {
       setStatus("ready");
+      if (pathname === "/") router.replace("/inbox");
     } else {
       setStatus("loading");
     }
@@ -72,20 +76,21 @@ export function InitialAppWarmup() {
       } catch {
         // Ignore storage errors.
       }
-      if (active) setStatus("ready");
+      if (!active) return;
+      setStatus("ready");
+      if (pathname === "/") router.replace("/inbox");
     };
 
-    const timeout = window.setTimeout(finish, 6500);
-    warmSharedResources(router).finally(() => {
-      window.clearTimeout(timeout);
-      finish();
+    const timeout = firstVisit ? window.setTimeout(finish, WARMUP_DURATION_MS) : undefined;
+    warmSharedResources(router).catch(() => {
+      // The fixed first-visit delay still completes even if prefetching fails.
     });
 
     return () => {
       active = false;
-      window.clearTimeout(timeout);
+      if (timeout !== undefined) window.clearTimeout(timeout);
     };
-  }, [router]);
+  }, [pathname, router]);
 
   // Keep the server-rendered shell unobstructed while browser storage is checked.
   if (status !== "loading") return null;
@@ -94,9 +99,7 @@ export function InitialAppWarmup() {
     <div className="initial-warmup" role="status" aria-live="polite" aria-label="Preparing workspace">
       <div className="initial-warmup-card">
         <div className="initial-warmup-mark" aria-hidden="true">
-          <span />
-          <span />
-          <span />
+          <img src="/cleardraft-icon.png" alt="" width={38} height={38} />
         </div>
         <div>
           <strong>Preparing your workspace</strong>

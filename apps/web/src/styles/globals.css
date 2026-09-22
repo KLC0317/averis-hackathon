@@ -1222,9 +1222,17 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
   border-radius: 10px;
-  background: var(--primary);
+  border: 1px solid var(--border-default);
+  background: var(--bg-muted);
+  overflow: hidden;
+}
+
+.initial-warmup-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .initial-warmup-mark span {

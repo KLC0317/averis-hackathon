@@ -37,6 +37,9 @@ Start the API and web development servers using the commands documented in
 [`docs/setup.md`](docs/setup.md). Local rules run without model credentials;
 selecting live AI mode requires the configured provider key.
 
+For the current VPS deployment and data-preserving release process, see
+[`docs/deployment.md`](docs/deployment.md).
+
 ### Docker Compose
 
 ```powershell

@@ -31,9 +31,9 @@ export const metadata: Metadata = {
   title: "ClearDraft · Shipping Document Verification",
   description: "Deterministic shipping document verification workspace with seven-field extraction, evidence locators, and automated discrepancy detection.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-    apple: "/favicon.svg",
+    icon: "/cleardraft-icon.png",
+    shortcut: "/cleardraft-icon.png",
+    apple: "/cleardraft-icon.png",
   }
 };
 
