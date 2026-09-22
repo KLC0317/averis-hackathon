@@ -76,7 +76,7 @@ DEFAULT_PRESETS = [
         "provider": "gmail",
         "host": "imap.gmail.com",
         "port": 993,
-        "username": "cleardraft.intake@gmail.com",
+        "username": "geminiacckl@gmail.com",
         "folder": "INBOX",
         "status": "ready",
     },
@@ -140,11 +140,20 @@ def _clean_body_text(raw_text: str) -> str:
     return text.strip()
 
 
-def parse_mime_message(raw_bytes: bytes, uid: int | str) -> tuple[dict[str, Any], dict[str, bytes]]:
-    """Parse raw RFC822 bytes into an email JSON record and attachment binaries."""
+def parse_mime_message(raw_bytes: bytes, uid: int | str, sequence: int | None = None) -> tuple[dict[str, Any], dict[str, bytes]]:
+    """Parse raw RFC822 bytes into an email JSON record and attachment binaries.
+
+    ``uid`` is the raw IMAP UID, an internal protocol detail that is often a
+    large, non-sequential number with no meaning to a human browsing cases; it
+    has nothing to do with how many messages have been retrieved so far. When
+    ``sequence`` is supplied (the running count of live-retrieved messages,
+    continued across retrieves), the display id uses that instead, so live
+    mail reads as email_live_1, email_live_2, ... like the rest of the corpus,
+    while the IMAP UID itself keeps doing its separate job as the cursor.
+    """
     msg = email.message_from_bytes(raw_bytes, policy=policy.default)
-    
-    email_id = f"email_live_{uid}"
+
+    email_id = f"email_live_{sequence}" if sequence is not None else f"email_live_{uid}"
     subject = str(msg.get("subject", "No Subject"))
     sender = str(msg.get("from", "unknown@counterparty.com"))
     date_header = str(msg.get("date", utc_now()))
@@ -196,7 +205,11 @@ def parse_mime_message(raw_bytes: bytes, uid: int | str) -> tuple[dict[str, Any]
     return email_obj, attachments
 
 
-def generate_demo_inbound_batch(connection_id: str, cursor_uid: int) -> tuple[list[dict[str, Any]], dict[str, bytes], int]:
+def generate_demo_inbound_batch(
+    connection_id: str,
+    cursor_uid: int,
+    start_sequence: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, bytes], int]:
     """Generates realistic live demo email messages with discrepancies when offline or in demo mode."""
     new_uid = cursor_uid + 1
 
@@ -257,7 +270,10 @@ def generate_demo_inbound_batch(connection_id: str, cursor_uid: int) -> tuple[li
     scenario_idx = (cursor_uid % len(demo_scenarios))
     sc = demo_scenarios[scenario_idx]
 
-    email_id = f"email_live_{new_uid:03d}"
+    # Cursor UIDs can jump, so they are not suitable display identifiers.
+    # Keep demo retrievals on the same human-readable sequence as IMAP mail.
+    email_number = (start_sequence + 1) if start_sequence is not None else new_uid
+    email_id = f"email_live_{email_number}"
     attachments_dict: dict[str, bytes] = {}
     attachment_paths: list[str] = []
 
@@ -317,8 +333,13 @@ def fetch_from_imap(
     last_uid: int = 0,
     max_count: int = 20,
     since_time: str | datetime | None = None,
+    start_sequence: int = 0,
 ) -> tuple[list[dict[str, Any]], dict[str, bytes], int]:
     """Connects to real IMAP server in read-only EXAMINE mode and fetches new messages.
+
+    ``start_sequence`` continues the human-readable email_live_N numbering
+    across retrieves (see parse_mime_message); it has no effect on the IMAP
+    UID cursor, which is tracked and advanced entirely separately.
 
     If ``since_time`` is provided (or set in environment), only messages received strictly
     at or after this cutoff timestamp are returned.
@@ -384,6 +405,10 @@ def fetch_from_imap(
                             # Skip emails received before cutoff
                             continue
 
+                    # Assign the human-readable id only for messages that
+                    # actually make it into this batch, so a since_dt-filtered
+                    # message never consumes a sequence number.
+                    email_obj["email_id"] = f"email_live_{start_sequence + len(emails) + 1}"
                     emails.append(email_obj)
                     all_attachments.update(atts)
                     break
@@ -400,8 +425,19 @@ def sync_mailbox_cursor_to_latest(
     store: Store,
     connection_id: str,
     password: str | None = None,
+    keep_last: int = 0,
 ) -> dict[str, Any]:
-    """Fast-forwards cursor to the highest existing mailbox UID to ignore historic mail."""
+    """Fast-forwards the cursor past historic mail, keeping the newest ``keep_last`` messages.
+
+    ``keep_last=0`` (default) skips everything currently in the mailbox, so the
+    next retrieve only picks up mail that arrives afterward. ``keep_last=N``
+    instead parks the cursor just before the Nth-from-last message, so the next
+    retrieve returns exactly those last N messages - useful for pointing a demo
+    at, say, the last 2 test emails sent, without touching whatever else is
+    sitting in the inbox. This uses the exact IMAP UID ordering rather than a
+    date cutoff (IMAP's SINCE search is day-granularity only and can't
+    distinguish "the last 2" from anything else received the same day).
+    """
     conn = store.get_mailbox_connection(connection_id)
     if not conn:
         raise ValueError(f"Mailbox connection '{connection_id}' not found")
@@ -416,14 +452,27 @@ def sync_mailbox_cursor_to_latest(
         mail.login(resolved_username, env_password)
         mail.select(conn.get("folder", "INBOX"), readonly=True)
         res, data = mail.uid("SEARCH", None, "ALL")
-        uids = [int(u) for u in data[0].split()] if res == "OK" and data and data[0] else []
+        uids = sorted(int(u) for u in data[0].split()) if res == "OK" and data and data[0] else []
         latest_uid = max(uids) if uids else 0
         previous_uid = int(conn.get("last_uid") or 0)
-        store.update_mailbox_cursor(connection_id, latest_uid, status="ready", last_polled_at=utc_now())
+
+        if keep_last > 0 and uids:
+            # Cursor sits just before the (keep_last)-th message from the end,
+            # so "UID cursor+1:*" on the next retrieve returns exactly those
+            # last keep_last messages. Fewer messages exist than requested ->
+            # keep everything (cursor 0) rather than guess.
+            cursor_uid = uids[-(keep_last + 1)] if len(uids) > keep_last else 0
+        else:
+            cursor_uid = latest_uid
+
+        store.update_mailbox_cursor(connection_id, cursor_uid, status="ready", last_polled_at=utc_now())
         return {
             "connection_id": connection_id,
             "previous_last_uid": previous_uid,
             "latest_uid": latest_uid,
+            "cursor_uid": cursor_uid,
+            "kept_last": keep_last,
+            "mailbox_message_count": len(uids),
             "synced_at": utc_now(),
         }
     finally:
@@ -454,6 +503,19 @@ def retrieve_mailbox_and_run(
     messages: list[dict[str, Any]] = []
     attachments: dict[str, bytes] = {}
     new_uid = last_uid
+
+    # Continue after the greatest existing display number. Counting rows is
+    # incorrect when an earlier import was partial or a retry left gaps.
+    with store.connect() as db:
+        live_ids = [r["email_id"] for r in db.execute(
+            "SELECT c.email_id FROM cases c JOIN imports i ON i.id=c.import_id "
+            "WHERE i.source_mode='mailbox'"
+        ).fetchall()]
+    start_sequence = max(
+        (int(match.group(1)) for value in live_ids
+         if (match := re.fullmatch(r"email_live_(\d+)", str(value)))),
+        default=0,
+    )
 
     # Determine effective cutoff timestamp (explicit argument, or .env setting)
     configured_since = since_time or _env_any("MAILBOX_SINCE", "LIVE_MAILBOX_SINCE", "EMAIL_SINCE")
@@ -489,16 +551,21 @@ def retrieve_mailbox_and_run(
                 last_uid=last_uid,
                 max_count=10,
                 since_time=configured_since,
+                start_sequence=start_sequence,
             )
             is_live = True
         except Exception as exc:
             if mode == "live":
                 raise RuntimeError(f"IMAP connection failed: {exc}") from exc
             # Auto fallback to demo fixture if live fails
-            messages, attachments, new_uid = generate_demo_inbound_batch(connection_id, last_uid)
+            messages, attachments, new_uid = generate_demo_inbound_batch(
+                connection_id, last_uid, start_sequence
+            )
     else:
         # Graceful deterministic demo fixture
-        messages, attachments, new_uid = generate_demo_inbound_batch(connection_id, last_uid)
+        messages, attachments, new_uid = generate_demo_inbound_batch(
+            connection_id, last_uid, start_sequence
+        )
 
     if not messages:
         # No new messages above high-water mark or cutoff

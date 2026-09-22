@@ -1,20 +1,15 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import Link from "next/link";
 import {
-  AlertCircle, ArrowRight, Award, BookOpen, Check, CheckCircle2, CircleHelp, Clock3, Copy,
-  Download, ExternalLink, FileCheck2, FileText, Filter, GitCompare, History, Layers, LoaderCircle,
-  PieChart, RefreshCw, Search, ShieldCheck, ShieldQuestion, Sparkles, Target, Timer,
-  TrendingUp, TriangleAlert, UploadCloud, X, Zap
+  Check, CheckCircle2, Clock3, Copy, FileText, Layers,
+  PieChart, ShieldCheck, Sparkles, Timer, TriangleAlert, UploadCloud, Zap
 } from "lucide-react";
 import {
-  apiClient, type EvaluationStatus, type Metrics, type RunReport
+  apiClient, type Metrics, type RunReport
 } from "../../api/client";
-import type { AuditEvent, PrecedentSummary } from "../../types";
 import { useToast } from "../../components/Toast";
-import { Button, MetricCard, PageHeader } from "../../components/UI";
-import { RLAuditSection } from "../../components/RLAuditSection";
+import { MetricCard, PageHeader } from "../../components/UI";
 
 const EMPTY_METRICS: Metrics = {
   importId: null, cases: 0, comparisons: 0, needsReview: 0,
@@ -22,51 +17,26 @@ const EMPTY_METRICS: Metrics = {
   unresolvedFields: 0, categoryCounts: {}
 };
 
-type ActiveTab = "overview" | "verification" | "telemetry" | "submission" | "reinforcement";
+type ActiveTab = "overview" | "telemetry" | "submission";
 
 export default function EvaluationPage() {
   const { toast } = useToast();
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
   const [report, setReport] = useState<RunReport | null>(null);
-  const [evaluation, setEvaluation] = useState<EvaluationStatus | null>(null);
   const [benchmarkInfo, setBenchmarkInfo] = useState<any>(null);
   const [metricsLoaded, setMetricsLoaded] = useState(false);
-  const [checking, setChecking] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
   const [externalScore, setExternalScore] = useState<{ score: number; label?: string; raw?: any } | null>(null);
 
-  // Reinforcement Learning & Precedents Audit State
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
-  const [precedents, setPrecedents] = useState<PrecedentSummary[]>([]);
-  const [promptSets, setPromptSets] = useState<any[]>([]);
-  const [auditFilter, setAuditFilter] = useState<string>("ALL");
-  const [auditSearch, setAuditSearch] = useState<string>("");
-  const [auditLoading, setAuditLoading] = useState<boolean>(false);
-
-  const loadAuditData = () => {
-    setAuditLoading(true);
-    Promise.all([
-      apiClient.listAuditEvents().catch(() => []),
-      apiClient.listAllPrecedents().catch(() => []),
-      apiClient.listPromptExampleSets().catch(() => [])
-    ]).then(([events, precs, sets]) => {
-      setAuditEvents(events);
-      setPrecedents(precs);
-      setPromptSets(sets);
-    }).finally(() => setAuditLoading(false));
-  };
-
   useEffect(() => {
-    loadAuditData();
-
     const syncTabFromUrl = () => {
       if (typeof window !== "undefined") {
         const params = new URLSearchParams(window.location.search);
         const tabParam = params.get("tab");
         if (tabParam === "reinforcement" || tabParam === "audit" || tabParam === "rl") {
-          setActiveTab("reinforcement");
+          setActiveTab("overview");
         } else if (tabParam === "verification") {
-          setActiveTab("verification");
+          setActiveTab("overview");
         } else if (tabParam === "telemetry") {
           setActiveTab("telemetry");
         } else if (tabParam === "submission") {
@@ -83,14 +53,12 @@ export default function EvaluationPage() {
     Promise.all([
       apiClient.getMetrics().catch(() => EMPTY_METRICS),
       apiClient.getReport().catch(() => null),
-      apiClient.getEvaluation().catch(() => null),
       apiClient.getBenchmarkInfo().catch(() => null)
-    ]).then(([m, rep, ev, bench]) => {
+    ]).then(([m, rep, bench]) => {
       setMetrics(m);
       const hasData = Boolean(m.importId || m.cases > 0 || rep || bench?.available);
       setMetricsLoaded(hasData);
       if (rep) setReport(rep);
-      if (ev) setEvaluation(ev);
       if (bench) setBenchmarkInfo(bench);
     });
 
@@ -99,60 +67,9 @@ export default function EvaluationPage() {
     };
   }, []);
 
-  const handleCheckEvaluator = () => {
-    setChecking(true);
-    apiClient
-      .getEvaluation(report?.run_id ?? undefined)
-      .then((status) => {
-        setEvaluation(status);
-        if (status.score != null) {
-          setExternalScore({ score: status.score, label: "Organizer Evaluator" });
-          toast(`Organizer score returned: ${status.score}%`, "success");
-        } else {
-          toast(
-            status.available ? "Evaluator responded" : `Evaluator: ${status.status.replace(/_/g, " ")}`,
-            status.available ? "success" : "info"
-          );
-        }
-      })
-      .catch(() => {
-        setEvaluation({ available: false, status: "UNREACHABLE", message: "Could not reach the evaluation API endpoint." });
-        toast("Could not reach the evaluation endpoint", "warning");
-      })
-      .finally(() => setChecking(false));
-  };
-
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toast(`Copied ${label} to clipboard`, "info");
-  };
-
-  const handleDownloadArtifact = (filename: "submission.json" | "run-report.json") => {
-    const a = document.createElement("a");
-    a.href = `http://127.0.0.1:8000/api/v1/artifacts/${filename}`;
-    a.download = filename;
-    a.target = "_blank";
-    a.click();
-    toast(`Downloading ${filename}`, "info");
-  };
-
-  const handleExportAuditLedger = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
-      title: "ClearDraft Reinforcement Learning & Operator Audit Ledger",
-      exported_at: new Date().toISOString(),
-      policy: "ADR-006 & Section 19 Immutable Weights Policy",
-      total_events: auditEvents.length,
-      precedents_count: precedents.length,
-      active_example_sets: promptSets,
-      events: auditEvents
-    }, null, 2));
-    const downloadAnchor = document.createElement("a");
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `cleardraft_rl_audit_ledger_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-    toast("Exported complete RL audit ledger as JSON", "success");
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -233,44 +150,7 @@ export default function EvaluationPage() {
           </span>
         }
         description="Audited verification parity across shipping documents, operator dwell telemetry, and scoring isolation."
-        actions={
-          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            <Button
-              variant="secondary"
-              icon={<ShieldQuestion size={15} className={checking ? "spin" : undefined} />}
-              onClick={handleCheckEvaluator}
-              disabled={checking}
-            >
-              {checking ? "Checking…" : "Check evaluator"}
-            </Button>
-            <Button
-              variant="secondary"
-              icon={<FileCheck2 size={15} />}
-              onClick={() => handleDownloadArtifact("submission.json")}
-              disabled={!activeRunId}
-            >
-              Export submission
-            </Button>
-            <Button
-              variant="primary"
-              icon={<Download size={15} />}
-              onClick={() => handleDownloadArtifact("run-report.json")}
-              disabled={!activeRunId}
-            >
-              Download run report
-            </Button>
-          </div>
-        }
       />
-
-      {!metricsLoaded && (
-        <div className="callout" style={{ marginBottom: 20 }}>
-          <TriangleAlert size={16} />
-          <span>
-            No Verification Data Loaded: Start the backend API and run the pipeline (<code>python -m cleardraft run</code>) to generate operational metrics. In accordance with ClearDraft&apos;s data honesty standard, no metrics or scores are ever fabricated.
-          </span>
-        </div>
-      )}
 
       {/* Hero Banner: Clean Benchmark Parity & Verification Rate */}
       <div className="eval-hero-banner" style={{ marginBottom: "24px" }}>
@@ -429,27 +309,10 @@ export default function EvaluationPage() {
         </button>
         <button
           type="button"
-          className={`eval-nav-pill ${activeTab === "verification" ? "active" : ""}`}
-          onClick={() => setActiveTab("verification")}
-        >
-          Verification Audit {totalComparisons != null ? `(${totalComparisons})` : ""}
-        </button>
-        <button
-          type="button"
           className={`eval-nav-pill ${activeTab === "telemetry" ? "active" : ""}`}
           onClick={() => setActiveTab("telemetry")}
         >
           Operator Telemetry & Dwell Study
-        </button>
-        <button
-          type="button"
-          className={`eval-nav-pill ${activeTab === "reinforcement" ? "active" : ""}`}
-          onClick={() => setActiveTab("reinforcement")}
-        >
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-            <Sparkles size={13} style={{ color: activeTab === "reinforcement" ? "#6366f1" : "inherit" }} />
-            Reinforcement Learning & Audit {auditEvents.length > 0 ? `(${auditEvents.length})` : ""}
-          </span>
         </button>
         <button
           type="button"
@@ -554,147 +417,7 @@ export default function EvaluationPage() {
         </div>
       )}
 
-      {/* TAB 2: VERIFICATION AUDIT */}
-      {activeTab === "verification" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div className="card">
-            <div className="card-heading">
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <FileCheck2 size={16} style={{ color: "var(--primary)" }} />
-                <h3>Document Comparison Verification Breakdown</h3>
-              </div>
-              <span className="mono" style={{ fontSize: "11px", color: "var(--ink-muted)" }}>
-                {totalComparisons != null ? `Audited against ${totalComparisons} draft B/L cases` : "No data"}
-              </span>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "14px", marginTop: "16px" }}>
-              <div className="eval-metric-stat">
-                <span className="stat-label">MATCH (100% Parity)</span>
-                <span className="stat-val" style={{ color: "#10b981" }}>
-                  {report?.counts?.verification?.MATCH != null ? report.counts.verification.MATCH : (autoClearedCount != null ? autoClearedCount : "—")}
-                </span>
-                <span className="stat-hint">Exact agreement on all 7 fields</span>
-              </div>
-
-              <div className="eval-metric-stat">
-                <span className="stat-label">MISMATCH (Defects Caught)</span>
-                <span className="stat-val" style={{ color: "#ef4444" }}>
-                  {report?.counts?.verification?.MISMATCH != null ? report.counts.verification.MISMATCH : "—"}
-                </span>
-                <span className="stat-hint">Confirmed discrepancies identified</span>
-              </div>
-
-              <div className="eval-metric-stat">
-                <span className="stat-label">NEEDS REVIEW</span>
-                <span className="stat-val" style={{ color: "#f59e0b" }}>
-                  {report?.counts?.verification?.NEEDS_REVIEW != null ? report.counts.verification.NEEDS_REVIEW : "—"}
-                </span>
-                <span className="stat-hint">Unreadable or missing values flagged</span>
-              </div>
-
-              <div className="eval-metric-stat">
-                <span className="stat-label">NON-COMPARISON</span>
-                <span className="stat-val" style={{ color: "#94a3b8" }}>
-                  {report?.counts?.verification?.NOT_APPLICABLE != null ? report.counts.verification.NOT_APPLICABLE : "—"}
-                </span>
-                <span className="stat-hint">SI requests, invoices, general queries</span>
-              </div>
-            </div>
-
-            <div style={{ marginTop: "24px" }}>
-              <h4 style={{ fontSize: "13px", fontWeight: 700, marginBottom: "12px" }}>
-                Discrepancy Breakdown by Resolution Route
-              </h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <div className="eval-audit-card">
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink-strong)", marginBottom: "8px" }}>
-                    Operator Action Queue {operatorActionCount != null ? `(${operatorActionCount} cases)` : ""}
-                  </div>
-                  <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: "12px", color: "var(--ink-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <li style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>• Container / Weight / Seal Mismatches</span>
-                      <strong className="mono" style={{ color: "var(--ink-strong)" }}>
-                        {metrics.funnel?.operator_breakdown?.field_mismatch != null ? `${metrics.funnel.operator_breakdown.field_mismatch} cases` : "—"}
-                      </strong>
-                    </li>
-                    <li style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>• Missing field values in submission</span>
-                      <strong className="mono" style={{ color: "var(--ink-strong)" }}>
-                        {metrics.funnel?.operator_breakdown?.missing_value != null ? `${metrics.funnel.operator_breakdown.missing_value} cases` : "—"}
-                      </strong>
-                    </li>
-                    <li style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>• Degraded / unreadable documents</span>
-                      <strong className="mono" style={{ color: "var(--ink-strong)" }}>
-                        {metrics.funnel?.operator_breakdown?.unreadable != null ? `${metrics.funnel.operator_breakdown.unreadable} cases` : "—"}
-                      </strong>
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="eval-audit-card">
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink-strong)", marginBottom: "8px" }}>
-                    Counterparty Action Queue {counterpartyActionCount != null ? `(${counterpartyActionCount} cases)` : ""}
-                  </div>
-                  <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: "12px", color: "var(--ink-muted)", display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <li style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>• Missing Draft Bill of Lading attachment</span>
-                      <strong className="mono" style={{ color: "var(--ink-strong)" }}>
-                        {metrics.funnel?.counterparty_breakdown?.missing_attachment != null ? `${metrics.funnel.counterparty_breakdown.missing_attachment} cases` : "—"}
-                      </strong>
-                    </li>
-                    <li style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>• Wrong document type (Packing List/Invoice)</span>
-                      <strong className="mono" style={{ color: "var(--ink-strong)" }}>
-                        {metrics.funnel?.counterparty_breakdown?.wrong_doc_type != null ? `${metrics.funnel.counterparty_breakdown.wrong_doc_type} cases` : "—"}
-                      </strong>
-                    </li>
-                    <li style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>• Automated drafting response ready</span>
-                      <strong className="mono" style={{ color: "#10b981" }}>
-                        {counterpartyActionCount != null ? "100% drafted" : "—"}
-                      </strong>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-heading">
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <FileText size={16} style={{ color: "var(--primary)" }} />
-                <h3>Document Ingestion & Optical Audit</h3>
-              </div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "12px" }}>
-              <div className="eval-audit-card">
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "13px" }}>
-                  <CheckCircle2 size={16} style={{ color: "#10b981" }} />
-                  Native Digital Documents: 100% Success
-                </div>
-                <p style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "6px", lineHeight: 1.5 }}>
-                  Native digital files (Vector PDFs, Word .docx, and Excel .xlsx) extracted cleanly across bounding boxes with exact block-level line coordinates.
-                </p>
-              </div>
-
-              <div className="eval-audit-card">
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "13px" }}>
-                  <ShieldCheck size={16} style={{ color: "#f59e0b" }} />
-                  Scanned Image Fallback: Fail-Safe Isolation
-                </div>
-                <p style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "6px", lineHeight: 1.5 }}>
-                  Scanned image PDFs detected without native text streams are fail-safely routed to operator review without hallucinating ungrounded OCR text.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: OPERATOR TELEMETRY & DWELL STUDY */}
+      {/* TAB 2: OPERATOR TELEMETRY & DWELL STUDY */}
       {activeTab === "telemetry" && (
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "20px" }}>
           <div className="card">
@@ -799,28 +522,6 @@ export default function EvaluationPage() {
       {/* TAB 4: ORGANIZER SUBMISSION & ISOLATION */}
       {activeTab === "submission" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* Isolation Banner */}
-          <div className="eval-status-banner">
-            <span className="eval-status-icon">
-              {evaluation?.available ? <CheckCircle2 size={18} /> : <Clock3 size={18} />}
-            </span>
-            <div>
-              <span className="eyebrow">ORGANIZER EVALUATOR STATUS</span>
-              <h2>
-                {evaluation
-                  ? evaluation.available
-                    ? "Score Available"
-                    : evaluation.status.replace(/_/g, " ")
-                  : "Pending Organizer Evaluation"}
-              </h2>
-              <p>
-                {evaluation
-                  ? evaluation.message || "The organizer evaluator is isolated from this application by design; no ground truth reference answers are ever loaded into it."
-                  : 'Click "Check evaluator" to query the organizer /evaluations endpoint. Ground truth answers are strictly isolated to guarantee data integrity.'}
-              </p>
-            </div>
-          </div>
-
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
             {/* Artifact Provenance */}
             <div className="card">
@@ -926,19 +627,6 @@ export default function EvaluationPage() {
         </div>
       )}
 
-      {/* TAB 4: REINFORCEMENT LEARNING & AUDIT */}
-      {activeTab === "reinforcement" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Link href="/rl-audit" style={{ textDecoration: "none" }}>
-              <Button variant="secondary" className="btn-sm" icon={<ExternalLink size={13} />}>
-                Open Dedicated RL Audit Page
-              </Button>
-            </Link>
-          </div>
-          <RLAuditSection />
-        </div>
-      )}
     </div>
   );
 }

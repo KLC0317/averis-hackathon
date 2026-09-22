@@ -2,45 +2,22 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
-  AlertCircle,
   ArrowDownToLine,
   ArrowRight,
   Check,
-  CheckCircle2,
-  ChevronRight,
   Clock,
   ExternalLink,
-  FileCheck2,
-  FileText,
-  Filter,
-  Flame,
-  Globe,
-  HelpCircle,
-  Inbox,
-  Layers,
   Lock,
   Mail,
-  Plus,
-  Radio,
   RefreshCw,
-  RotateCcw,
-  Search,
-  Server,
-  Shield,
-  ShieldAlert,
   ShieldCheck,
-  Sparkles,
-  Zap
+  Sparkles
 } from "lucide-react";
 import {
   apiClient,
   type MailboxConnection,
-  type MailboxStatus,
-  type MailboxRetrieveResult,
-  type CorrectionCandidate,
-  type PromptExampleSet
+  type MailboxRetrieveResult
 } from "../../api/client";
 import { useToast } from "../../components/Toast";
 import { Button, PageHeader, StatusBadge } from "../../components/UI";
@@ -48,58 +25,31 @@ import { Button, PageHeader, StatusBadge } from "../../components/UI";
 const cx = (...values: Array<string | false | undefined | null>) => values.filter(Boolean).join(" ");
 
 export default function LiveMailboxPage() {
-  const router = useRouter();
   const { toast } = useToast();
 
   const [connections, setConnections] = useState<MailboxConnection[]>([]);
   const [selectedConnId, setSelectedConnId] = useState<string>("conn_gmail");
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [retrieving, setRetrieving] = useState(false);
   const [activeStep, setActiveStep] = useState<number>(0);
   const [retrieveResult, setRetrieveResult] = useState<MailboxRetrieveResult | null>(null);
-  // Defaults to live: during a demo, silently showing fixtures as if they were
-  // retrieved mail is far worse than an explicit connection error.
-  const [retrieveMode, setRetrieveMode] = useState<"live" | "demo">("live");
-
-  // Feature A curation tab state
-  const [activeTab, setActiveTab] = useState<"sources" | "curation">("sources");
-  const [candidates, setCandidates] = useState<CorrectionCandidate[]>([]);
-  const [exampleSets, setExampleSets] = useState<PromptExampleSet[]>([]);
-  const [promoting, setPromoting] = useState(false);
+  const gmailConnection = connections.find((connection) => connection.provider === "gmail");
+  const testAddress = gmailConnection?.username ?? "geminiacckl@gmail.com";
 
   const loadConnections = async () => {
     try {
-      setRefreshing(true);
       const conns = await apiClient.listMailboxConnections();
       setConnections(conns);
-      if (conns.length > 0 && !conns.some((c) => c.id === selectedConnId)) {
-        setSelectedConnId(conns[0].id);
+      const gmail = conns.find((connection) => connection.provider === "gmail");
+      if (gmail && selectedConnId !== gmail.id) {
+        setSelectedConnId(gmail.id);
       }
     } catch {
       toast("Could not connect to backend service", "warning");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const loadCurationData = async () => {
-    try {
-      const [cands, sets] = await Promise.all([
-        apiClient.listCorrectionCandidates(),
-        apiClient.listPromptExampleSets()
-      ]);
-      setCandidates(cands);
-      setExampleSets(sets);
-    } catch {
-      // Ignore background load error
     }
   };
 
   useEffect(() => {
     loadConnections();
-    loadCurationData();
   }, []);
 
   const handleRetrieve = async (connId: string) => {
@@ -114,7 +64,7 @@ export default function LiveMailboxPage() {
     try {
       // "live" fails loudly rather than substituting demo fixtures, so what is
       // shown on screen is never fabricated mail presented as retrieved mail.
-      const res = await apiClient.retrieveMailbox(connId, { mode: retrieveMode });
+      const res = await apiClient.retrieveMailbox(connId, { mode: "live" });
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
       setActiveStep(4);
@@ -135,61 +85,6 @@ export default function LiveMailboxPage() {
     }
   };
 
-  const handleResetCursor = async (connId: string) => {
-    try {
-      const res = await apiClient.resetMailboxCursor(connId);
-      toast(`Cursor rewound from UID ${res.previous_last_uid} to 0 · mail can be re-ingested`, "success");
-      setRetrieveResult(null);
-      setActiveStep(0);
-      loadConnections();
-    } catch (err: any) {
-      toast(err?.message || "Failed to reset cursor", "warning");
-    }
-  };
-
-  const handleSyncLatest = async (connId: string) => {
-    try {
-      const res = await apiClient.syncLatestMailboxCursor(connId);
-      toast(`Fast-forwarded cursor to latest UID ${res.latest_uid} · historic mail skipped`, "success");
-      loadConnections();
-    } catch (err: any) {
-      toast(err?.message || "Failed to sync cursor", "warning");
-    }
-  };
-
-  const handlePromoteBatch = async () => {
-    const unpromoted = candidates.filter((c) => !c.is_promoted);
-    if (unpromoted.length === 0) {
-      toast("No unpromoted corrections available in the queue", "info");
-      return;
-    }
-
-    setPromoting(true);
-    try {
-      const nextVersionNum = exampleSets.length + 1;
-      const versionStr = `examples-v${nextVersionNum}`;
-      const newSet = await apiClient.createPromptExampleSet({
-        version: versionStr,
-        examples: unpromoted.map((c) => ({
-          subject: c.subject,
-          category: c.new_category,
-          rationale: c.rationale,
-          body_excerpt: c.body_excerpt
-        })),
-        source_event_ids: unpromoted.map((c) => c.id),
-        notes: `Curated batch of ${unpromoted.length} operator rationale(s)`,
-        created_by: "operator",
-        status: "active"
-      });
-      toast(`Promoted ${unpromoted.length} corrections into active set ${newSet.version}`, "success");
-      loadCurationData();
-    } catch (err: any) {
-      toast(err?.message || "Failed to promote example set", "warning");
-    } finally {
-      setPromoting(false);
-    }
-  };
-
   return (
     <div className="content-wrap">
       <PageHeader
@@ -198,76 +93,76 @@ export default function LiveMailboxPage() {
             Live <span className="title-gradient-accent">Mailbox</span>
           </span>
         }
-        description="Source-agnostic shipping document ingestion via read-only IMAP protocols (RFC 3501 EXAMINE mode)."
+        description="Gmail intake for live shipping-email testing. Send a message, retrieve it, and review the resulting case."
         actions={
           <>
-            {/* Explicit source selector: the operator always knows whether what
-                appears next came from a real inbox or a deterministic fixture. */}
-            <div
-              role="group"
-              aria-label="Retrieval source"
-              style={{
-                display: "flex", border: "1px solid var(--border-default)",
-                borderRadius: "6px", overflow: "hidden"
-              }}
-            >
-              {(["live", "demo"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setRetrieveMode(m)}
-                  disabled={retrieving}
-                  title={m === "live"
-                    ? "Connect to the real IMAP mailbox; fails loudly if credentials are missing"
-                    : "Use the built-in deterministic fixture; never touches the network"}
-                  style={{
-                    padding: "6px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                    border: "none",
-                    background: retrieveMode === m ? "var(--primary)" : "transparent",
-                    color: retrieveMode === m ? "#ffffff" : "var(--ink-secondary)"
-                  }}
-                >
-                  {m === "live" ? "Live" : "Demo"}
-                </button>
-              ))}
-            </div>
-            <Button
-              variant="secondary"
-              icon={<RotateCcw size={15} />}
-              onClick={() => handleResetCursor(selectedConnId)}
-              disabled={refreshing || retrieving}
-              title="Rewind the UID cursor so already-ingested mail can be pulled again"
-            >
-              Reset cursor
-            </Button>
-            <Button
-              variant="secondary"
-              icon={<Clock size={15} />}
-              onClick={() => handleSyncLatest(selectedConnId)}
-              disabled={refreshing || retrieving}
-              title="Fast-forward cursor to latest inbox message, skipping all historic mail"
-            >
-              Skip past mail
-            </Button>
-            <Button
-              variant="secondary"
-              icon={<RefreshCw size={15} className={refreshing ? "spin" : undefined} />}
-              onClick={loadConnections}
-              disabled={refreshing || retrieving}
-            >
-              {refreshing ? "Checking..." : "Refresh"}
-            </Button>
             <Button
               variant="primary"
               icon={<ArrowDownToLine size={15} />}
-              onClick={() => handleRetrieve(selectedConnId)}
-              disabled={retrieving}
+              onClick={() => gmailConnection && handleRetrieve(gmailConnection.id)}
+              disabled={retrieving || !gmailConnection}
             >
-              {retrieving ? "Retrieving..." : retrieveMode === "live" ? "Retrieve Live" : "Retrieve Demo"}
+              {retrieving ? "Retrieving..." : "Retrieve from Gmail"}
             </Button>
           </>
         }
       />
+
+      <div
+        className="funnel-panel"
+        style={{
+          marginBottom: "20px",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "14px",
+          padding: "18px 20px"
+        }}
+      >
+        <div
+          style={{
+            width: "36px",
+            height: "36px",
+            borderRadius: "9px",
+            background: "#fee2e2",
+            color: "#dc2626",
+            display: "grid",
+            placeItems: "center",
+            flexShrink: 0
+          }}
+          aria-hidden="true"
+        >
+          <Mail size={19} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--ink)" }}>
+            Test the Gmail intake
+          </div>
+          <p style={{ margin: "4px 0 0", fontSize: "12.5px", color: "var(--ink-secondary)", lineHeight: 1.55 }}>
+            Send a test email from your own account to{" "}
+            <a
+              href={`mailto:${testAddress}`}
+              style={{ color: "var(--primary)", fontWeight: 700, textDecoration: "underline", textUnderlineOffset: "2px" }}
+            >
+              {testAddress}
+            </a>{" "}
+            with any subject, body, or shipping attachments. Then click <strong>Retrieve from Gmail</strong>,
+            then open the case in the live queue to test the review workflow and its actions.
+          </p>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "10px" }}>
+            <Link href="/inbox?source=mailbox" className="btn btn-secondary btn-sm">
+              Open live queue <ArrowRight size={13} />
+            </Link>
+            <a
+              href={`https://mail.google.com/mail/u/?authuser=${encodeURIComponent(testAddress)}#inbox`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-ghost btn-sm"
+            >
+              Open Gmail <ExternalLink size={12} />
+            </a>
+          </div>
+        </div>
+      </div>
 
       {/* Trust & Architecture Disclosure Banners */}
       <div className="funnel-panel" style={{ marginBottom: "20px" }}>
@@ -301,7 +196,7 @@ export default function LiveMailboxPage() {
             </div>
             <div>
               <div style={{ fontWeight: 600, fontSize: "13px", color: "var(--ink)" }}>
-                Strict Read-Only IMAP (RFC 3501 §6.3.2)
+                Strict Read-Only IMAP (RFC 3501 section 6.3.2)
               </div>
               <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px", lineHeight: "1.4" }}>
                 ClearDraft uses IMAP <code>EXAMINE</code> mode exclusively—never <code>STORE</code> or <code>DELETE</code>. Your real inboxes are never modified or altered.
@@ -348,28 +243,6 @@ export default function LiveMailboxPage() {
         </div>
       </div>
 
-      {/* Primary Navigation Tabs */}
-      <div className="filter-pill-group" style={{ marginBottom: "20px" }}>
-        <button
-          type="button"
-          className={`filter-pill ${activeTab === "sources" ? "active" : ""}`}
-          onClick={() => setActiveTab("sources")}
-        >
-          <Radio size={13} style={{ marginRight: "6px" }} />
-          Live Mailbox Sources ({connections.length})
-        </button>
-        <button
-          type="button"
-          className={`filter-pill ${activeTab === "curation" ? "active" : ""}`}
-          onClick={() => setActiveTab("curation")}
-        >
-          <Sparkles size={13} style={{ marginRight: "6px" }} />
-          Correction Learning Loop ({candidates.length} candidates)
-        </button>
-      </div>
-
-      {activeTab === "sources" ? (
-        <>
           {/* Source Provider Cards Grid */}
           <div
             style={{
@@ -381,6 +254,7 @@ export default function LiveMailboxPage() {
           >
             {connections.map((conn) => {
               const isSelected = selectedConnId === conn.id;
+              const isAvailable = conn.provider === "gmail";
               const providerName =
                 conn.provider === "gmail" ? "Gmail" : conn.provider === "outlook" ? "Outlook 365" : "Generic IMAP";
               const isGmail = conn.provider === "gmail";
@@ -389,14 +263,16 @@ export default function LiveMailboxPage() {
               return (
                 <div
                   key={conn.id}
-                  onClick={() => setSelectedConnId(conn.id)}
+                  onClick={isAvailable ? () => setSelectedConnId(conn.id) : undefined}
+                  aria-disabled={!isAvailable}
                   style={{
                     background: "var(--surface)",
-                    border: `1.5px solid ${isSelected ? "var(--primary)" : "var(--border)"}`,
+                    border: `1.5px solid ${isSelected && isAvailable ? "var(--primary)" : "var(--border)"}`,
                     borderRadius: "var(--radius)",
                     padding: "18px",
-                    cursor: "pointer",
-                    boxShadow: isSelected ? "0 0 0 3px rgba(37, 99, 235, 0.12)" : "none",
+                    cursor: isAvailable ? "pointer" : "default",
+                    opacity: isAvailable ? 1 : 0.72,
+                    boxShadow: isSelected && isAvailable ? "0 0 0 3px rgba(37, 99, 235, 0.12)" : "none",
                     transition: "all 0.15s ease",
                     position: "relative"
                   }}
@@ -428,12 +304,12 @@ export default function LiveMailboxPage() {
                     <span
                       className="kpi-pill"
                       style={{
-                        background: "rgba(16, 185, 129, 0.1)",
-                        color: "#059669",
-                        borderColor: "rgba(16, 185, 129, 0.2)"
+                        background: isAvailable ? "rgba(16, 185, 129, 0.1)" : "var(--bg-subtle)",
+                        color: isAvailable ? "#059669" : "var(--ink-muted)",
+                        borderColor: isAvailable ? "rgba(16, 185, 129, 0.2)" : "var(--border-default)"
                       }}
                     >
-                      EXAMINE Ready
+                      {isAvailable ? "EXAMINE Ready" : "Coming soon"}
                     </span>
                   </div>
 
@@ -483,22 +359,26 @@ export default function LiveMailboxPage() {
                         ? `Polled: ${new Date(conn.last_polled_at).toLocaleTimeString()}`
                         : "Ready for pull"}
                     </span>
-                    <Button
-                      variant={isSelected ? "primary" : "secondary"}
-                      className="btn-sm"
-                      icon={<ArrowDownToLine size={13} />}
-                      disabled={retrieving}
-                      onClick={() => {
-                        setSelectedConnId(conn.id);
-                        handleRetrieve(conn.id);
-                      }}
-                    >
-                      {retrieving && isSelected ? "Fetching..." : "Retrieve"}
-                    </Button>
+                    <span className={`status-badge ${isAvailable ? "success" : "muted"}`}>
+                      {isAvailable ? "Gmail connected" : "Integration planned"}
+                    </span>
                   </div>
                 </div>
               );
             })}
+            {!gmailConnection && (
+              <div
+                style={{
+                  padding: "18px",
+                  border: "1px dashed var(--border-default)",
+                  borderRadius: "var(--radius)",
+                  color: "var(--ink-muted)",
+                  fontSize: "13px"
+                }}
+              >
+                Gmail is not configured in this environment yet. Add the mailbox credentials, then reload this page.
+              </div>
+            )}
           </div>
 
           {/* Real-Time Ingestion Stepper during fetch */}
@@ -572,7 +452,7 @@ export default function LiveMailboxPage() {
                 </div>
 
                 <div style={{ display: "flex", gap: "8px" }}>
-                  <Link href="/inbox" className="btn btn-secondary btn-sm">
+                  <Link href="/inbox?source=mailbox" className="btn btn-secondary btn-sm">
                     View in Operations Queue
                     <ArrowRight size={13} style={{ marginLeft: "4px" }} />
                   </Link>
@@ -626,143 +506,6 @@ export default function LiveMailboxPage() {
               )}
             </div>
           )}
-        </>
-      ) : (
-        /* Feature A: Correction-Guided Few-Shot Curation Panel */
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* ADR-006 Curation Summary Banner */}
-          <div
-            style={{
-              padding: "16px",
-              borderRadius: "var(--radius)",
-              background: "rgba(37, 99, 235, 0.05)",
-              border: "1px solid rgba(37, 99, 235, 0.2)",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center"
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--ink)" }}>
-                ADR-006: Governed Few-Shot Prompt Learning Loop
-              </div>
-              <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px", maxWidth: "700px" }}>
-                Operator corrections do not automatically inject into models. Human rationales accumulate as candidates, which are curated and frozen into immutable versioned sets pinned to <code>policy_version</code>.
-              </div>
-            </div>
-
-            <Button
-              variant="primary"
-              icon={<Sparkles size={14} />}
-              onClick={handlePromoteBatch}
-              disabled={promoting || candidates.filter((c) => !c.is_promoted).length === 0}
-            >
-              {promoting ? "Freezing..." : "Promote Active Set"}
-            </Button>
-          </div>
-
-          {/* Active Prompt Example Sets */}
-          <div className="card" style={{ padding: "18px", background: "var(--surface)", border: "1px solid var(--border)" }}>
-            <h3 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: 600 }}>
-              Immutable Example Sets ({exampleSets.length})
-            </h3>
-            {exampleSets.length === 0 ? (
-              <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>
-                No versioned sets frozen yet. Review candidates below and promote them.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {exampleSets.map((s) => (
-                  <div
-                    key={s.id}
-                    style={{
-                      padding: "12px 14px",
-                      borderRadius: "6px",
-                      background: "var(--bg)",
-                      border: "1px solid var(--border)",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center"
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span className="mono" style={{ fontWeight: 600, fontSize: "13px" }}>
-                          {s.version}
-                        </span>
-                        <span className={`kpi-pill ${s.status === "active" ? "active" : ""}`}>
-                          {s.status.toUpperCase()}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: "11px", color: "var(--ink-muted)", marginTop: "2px" }}>
-                        {s.notes || "Operator curated examples"} · {s.examples.length} precedent example(s)
-                      </div>
-                    </div>
-                    <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>
-                      {new Date(s.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Unpromoted Correction Candidates */}
-          <div className="card" style={{ padding: "18px", background: "var(--surface)", border: "1px solid var(--border)" }}>
-            <h3 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: 600 }}>
-              Operator Correction Candidates ({candidates.length})
-            </h3>
-            {candidates.length === 0 ? (
-              <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>
-                Zero corrections logged. When an operator corrects a case category in the Case Review workspace, it appears here with its mandatory typed rationale.
-              </div>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table className="table" style={{ width: "100%" }}>
-                  <thead>
-                    <tr>
-                      <th>Case</th>
-                      <th>Old Category</th>
-                      <th>Corrected Category</th>
-                      <th>Human Rationale</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {candidates.map((cand) => (
-                      <tr key={cand.id}>
-                        <td>
-                          <Link href={`/cases/${cand.case_id}`} className="table-id-link">
-                            {cand.email_id || cand.case_id.slice(0, 8)}
-                          </Link>
-                        </td>
-                        <td>
-                          <span style={{ color: "var(--ink-muted)", textDecoration: "line-through" }}>
-                            {cand.old_category}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="kpi-pill active">{cand.new_category}</span>
-                        </td>
-                        <td style={{ fontSize: "12px", maxWidth: "350px", fontStyle: "italic", color: "var(--ink)" }}>
-                          “{cand.rationale}”
-                        </td>
-                        <td>
-                          {cand.is_promoted ? (
-                            <span className="status-badge success">Promoted</span>
-                          ) : (
-                            <span className="status-badge warning">Candidate</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

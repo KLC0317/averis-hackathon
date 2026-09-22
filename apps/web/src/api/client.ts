@@ -153,12 +153,19 @@ export interface MailboxRetrieveResult {
 
 export interface ApiClient {
   getReadiness(): Promise<ReadinessStatus>;
-  listCases(params?: { category?: string; state?: string; query?: string; limit?: string | number }): Promise<CaseSummary[]>;
+  listCases(params?: {
+    category?: string; state?: string; query?: string; limit?: string | number;
+    /** Aggregate across every mailbox-sourced import instead of the largest
+     * single import - a live mailbox is one growing inbox even though each
+     * retrieve internally creates its own immutable import batch. */
+    source?: "mailbox";
+    import_id?: string;
+  }): Promise<CaseSummary[]>;
   getCase(id: string): Promise<CaseDetail>;
   getCaseHistory(caseId: string): Promise<CaseHistory>;
   listReviewEvents(caseId: string): Promise<ReviewEvent[]>;
   getSourcePreview(documentId: string): Promise<SourcePreview>;
-  listImports(): Promise<ImportRecord[]>;
+  listImports(includeMailbox?: boolean): Promise<ImportRecord[]>;
   createImport(file: File): Promise<{ importId: string; runId?: string }>;
   startRun(importId: string, mode?: "local_rules" | "live_ai" | "recorded_replay"): Promise<{ runId: string }>;
   getRun(runId: string): Promise<{ id: string; status: string; progress: number }>;
@@ -178,7 +185,7 @@ export interface ApiClient {
   resolveArbitration(caseId: string, category: string, caseVersion: number, note?: string): Promise<ArbitrationResolution>;
   /** Real, locally-computable counts for the selected import - never a score,
    * since scoring requires the organizer's private reference set. */
-  getMetrics(importId?: string): Promise<Metrics>;
+  getMetrics(importId?: string, source?: "mailbox"): Promise<Metrics>;
   /** Always resolves; check `.available`. The organizer evaluator is
    * intentionally isolated from this application, so this legitimately
    * returns `{ available: false, status: "PENDING_ORGANIZER" }` until a
@@ -254,7 +261,15 @@ export interface ApiClient {
    * again. Needed to rehearse a demo; the mailbox itself is never modified. */
   resetMailboxCursor(connId: string): Promise<{ connection_id: string; previous_last_uid: number; last_uid: number }>;
   /** Fast-forward cursor to latest inbox message to skip all historic mail. */
-  syncLatestMailboxCursor(connId: string): Promise<{ connection_id: string; previous_last_uid: number; latest_uid: number; synced_at: string }>;
+  /** Fast-forward the IMAP cursor past historic mail. `keepLast` (default 0)
+   * controls how much stays visible to the next retrieve: 0 skips everything
+   * currently in the mailbox, N parks the cursor so exactly the newest N
+   * messages come back next time - e.g. keepLast: 2 to demo the last 2 test
+   * emails sent, ignoring anything older already sitting in the inbox. */
+  syncLatestMailboxCursor(connId: string, params?: { keepLast?: number }): Promise<{
+    connection_id: string; previous_last_uid: number; latest_uid: number;
+    cursor_uid: number; kept_last: number; mailbox_message_count: number; synced_at: string;
+  }>;
   /** List chronological review and reinforcement events for audit inspection. */
   listAuditEvents(limit?: number): Promise<AuditEvent[]>;
   /** List all active taught equivalence conventions across the system. */
@@ -715,11 +730,15 @@ export function createApiClient(): ApiClient {
       sourcePreviewMemoryCache.set(documentId, { data: prev, timestamp: Date.now() });
       return prev;
     },
-    listImports: async () => (await request<any[]>("/imports"))
-      .filter((item) => item.source_mode !== "mailbox")
+    listImports: async (includeMailbox = false) => (await request<any[]>(
+      `/imports${includeMailbox ? "?include_mailbox=true" : ""}`
+    ))
+      .filter((item) => includeMailbox || item.source_mode !== "mailbox")
       .map((item) => ({
         id: item.id,
-        name: item.source_mode === "directory" ? "sdoc-participant-bundle.zip" : (item.source_mode ?? item.id),
+        name: item.source_mode === "directory"
+          ? "sdoc-participant-bundle.zip"
+          : item.source_mode === "mailbox" ? "Live mailbox batch" : (item.source_mode ?? item.id),
         createdAt: item.created_at,
         status: item.status === "IMPORTED" ? "Ready" : item.status,
         emails: item.email_count ?? 0,
@@ -797,8 +816,11 @@ export function createApiClient(): ApiClient {
         caseVersion: value.case_version
       };
     },
-    getMetrics: async (importId) => {
-      const query = importId ? `?import_id=${encodeURIComponent(importId)}` : "";
+    getMetrics: async (importId, source) => {
+      const params = new URLSearchParams();
+      if (importId) params.set("import_id", importId);
+      if (source) params.set("source", source);
+      const query = params.toString() ? `?${params.toString()}` : "";
       const value = await request<any>(`/metrics${query}`);
       return {
         importId: value.import_id ?? null,
@@ -931,10 +953,14 @@ export function createApiClient(): ApiClient {
     resetMailboxCursor: async (connId) => {
       return await request(`/mailbox/${encodeURIComponent(connId)}/reset`, { method: "POST" });
     },
-    syncLatestMailboxCursor: async (connId: string) => {
-      return await request<{ connection_id: string; previous_last_uid: number; latest_uid: number; synced_at: string }>(
+    syncLatestMailboxCursor: async (connId, params) => {
+      return await request(
         `/mailbox/${encodeURIComponent(connId)}/sync-latest`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keep_last: params?.keepLast ?? 0 })
+        }
       );
     },
     listAuditEvents: async (limit?: number) => {
@@ -1003,19 +1029,30 @@ export const apiClient = createApiClient();
 const CASES_CACHE_KEY = "cleardraft:cached_cases_v1";
 const METRICS_CACHE_KEY = "cleardraft:cached_metrics_v1";
 
-let memoryCasesCache: CaseSummary[] | null = null;
-let memoryMetricsCache: Metrics | null = null;
+// Unlike every other cache in this file (all keyed with a timestamp against
+// CACHE_TTL_MS), this one had no expiry at all: a snapshot taken before a
+// mailbox retrieve - or before a backend change like the Imports+Live merge -
+// would otherwise be shown as current indefinitely, until some other code
+// path happened to overwrite it. Wrapping with the same TTL convention used
+// elsewhere means a stale snapshot free-falls back to "no cache" instead of
+// silently masquerading as fresh data.
+let memoryCasesCache: { data: CaseSummary[]; timestamp: number } | null = null;
+let memoryMetricsCache: { data: Metrics; timestamp: number } | null = null;
 
 export function getCachedCases(): CaseSummary[] | null {
-  if (memoryCasesCache && memoryCasesCache.length > 0) return memoryCasesCache;
+  if (memoryCasesCache && memoryCasesCache.data.length > 0 && Date.now() - memoryCasesCache.timestamp < CACHE_TTL_MS) {
+    return memoryCasesCache.data;
+  }
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(CASES_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      memoryCasesCache = parsed;
-      return parsed;
+    const data = Array.isArray(parsed) ? parsed : parsed?.data;
+    const timestamp = Array.isArray(parsed) ? 0 : (parsed?.timestamp ?? 0);
+    if (Array.isArray(data) && data.length > 0 && Date.now() - timestamp < CACHE_TTL_MS) {
+      memoryCasesCache = { data, timestamp };
+      return data;
     }
   } catch {
     // Ignore storage parse errors
@@ -1024,25 +1061,32 @@ export function getCachedCases(): CaseSummary[] | null {
 }
 
 export function setCachedCases(cases: CaseSummary[]): void {
-  memoryCasesCache = cases;
+  const entry = { data: cases, timestamp: Date.now() };
+  memoryCasesCache = entry;
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(CASES_CACHE_KEY, JSON.stringify(cases));
+    window.localStorage.setItem(CASES_CACHE_KEY, JSON.stringify(entry));
   } catch {
     // Ignore quota errors
   }
 }
 
 export function getCachedMetrics(): Metrics | null {
-  if (memoryMetricsCache) return memoryMetricsCache;
+  if (memoryMetricsCache && Date.now() - memoryMetricsCache.timestamp < CACHE_TTL_MS) {
+    return memoryMetricsCache.data;
+  }
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(METRICS_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      memoryMetricsCache = parsed;
-      return parsed;
+    // Back-compat: an older cache stored the bare metrics object with no wrapper.
+    const hasWrapper = parsed && typeof parsed === "object" && "data" in parsed && "timestamp" in parsed;
+    const data = hasWrapper ? parsed.data : parsed;
+    const timestamp = hasWrapper ? parsed.timestamp : 0;
+    if (data && typeof data === "object" && Date.now() - timestamp < CACHE_TTL_MS) {
+      memoryMetricsCache = { data, timestamp };
+      return data;
     }
   } catch {
     // Ignore storage parse errors
@@ -1051,10 +1095,11 @@ export function getCachedMetrics(): Metrics | null {
 }
 
 export function setCachedMetrics(metrics: Metrics): void {
-  memoryMetricsCache = metrics;
+  const entry = { data: metrics, timestamp: Date.now() };
+  memoryMetricsCache = entry;
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(METRICS_CACHE_KEY, JSON.stringify(metrics));
+    window.localStorage.setItem(METRICS_CACHE_KEY, JSON.stringify(entry));
   } catch {
     // Ignore quota errors
   }

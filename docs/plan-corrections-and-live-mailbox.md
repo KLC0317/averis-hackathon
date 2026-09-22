@@ -26,12 +26,12 @@ or "RL" is inaccurate and invites a question you cannot answer well.
 
 ## The decision this overrides
 
-`IMPLEMENTATION_PLAN.md` §19 currently states:
+`IMPLEMENTATION_PLAN.md` section 19 currently states:
 
 > Global rule learning from one correction | **Disabled**; changes require
 > explicit reviewed policy and regression tests
 
-This feature is allowed to change that default, but §19 also says: *"If a
+This feature is allowed to change that default, but section 19 also says: *"If a
 default must change, write an architecture decision record explaining why,
 what behavior changes, and which tests cover it."* So **ADR-006 in
 `docs/decisions.md` is a deliverable of this work, not optional paperwork.**
@@ -184,7 +184,7 @@ Preserve it with three rules:
 | A3 | Promotion into versioned immutable sets + CLI | Yes - curated library |
 | A4 | Injection into `classify_email` + `policy_version` pinning | Completes the loop |
 | A5 | Blind-split gate wired into the promotion command | Enforces the ADR |
-| A6 | ADR-006 written; §19 footnote updated | Required to close |
+| A6 | ADR-006 written; section 19 footnote updated | Required to close |
 
 **For a hackathon demo**, A1 + A4 with 2-3 corrections made live is enough to
 show the whole mechanism. A2/A3/A5 are what make it defensible rather than a

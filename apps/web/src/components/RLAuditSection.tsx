@@ -6,7 +6,7 @@ import {
   BookOpen, CheckCircle2, Download, ExternalLink, FileCheck2,
   GitCompare, History, RefreshCw, Search, ShieldCheck, Sparkles, X
 } from "lucide-react";
-import { apiClient } from "../api/client";
+import { apiClient, type CorrectionCandidate } from "../api/client";
 import type { AuditEvent, PrecedentSummary } from "../types";
 import { useToast } from "./Toast";
 import { Button } from "./UI";
@@ -16,6 +16,8 @@ export function RLAuditSection() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [precedents, setPrecedents] = useState<PrecedentSummary[]>([]);
   const [promptSets, setPromptSets] = useState<any[]>([]);
+  const [candidates, setCandidates] = useState<CorrectionCandidate[]>([]);
+  const [promoting, setPromoting] = useState(false);
   const [auditFilter, setAuditFilter] = useState<string>("ALL");
   const [auditSearch, setAuditSearch] = useState<string>("");
   const [auditLoading, setAuditLoading] = useState<boolean>(false);
@@ -25,17 +27,57 @@ export function RLAuditSection() {
     Promise.all([
       apiClient.listAuditEvents().catch(() => []),
       apiClient.listAllPrecedents().catch(() => []),
-      apiClient.listPromptExampleSets().catch(() => [])
-    ]).then(([events, precs, sets]) => {
+      apiClient.listPromptExampleSets().catch(() => []),
+      apiClient.listCorrectionCandidates().catch(() => [])
+    ]).then(([events, precs, sets, cands]) => {
       setAuditEvents(events);
       setPrecedents(precs);
       setPromptSets(sets);
+      setCandidates(cands);
     }).finally(() => setAuditLoading(false));
   };
 
   useEffect(() => {
     loadAuditData();
   }, []);
+
+  // Turns curated operator corrections into a new, immutable, versioned
+  // few-shot set (ADR-006). This is the only place in the app that actually
+  // calls createPromptExampleSet - the promotion step remains a deliberate,
+  // human-triggered action rather than something that happens automatically
+  // as corrections accumulate.
+  const handlePromoteBatch = async () => {
+    const unpromoted = candidates.filter((c) => !c.is_promoted);
+    if (unpromoted.length === 0) {
+      toast("No unpromoted corrections available in the queue", "info");
+      return;
+    }
+
+    setPromoting(true);
+    try {
+      const nextVersionNum = promptSets.length + 1;
+      const versionStr = `examples-v${nextVersionNum}`;
+      const newSet = await apiClient.createPromptExampleSet({
+        version: versionStr,
+        examples: unpromoted.map((c) => ({
+          subject: c.subject,
+          category: c.new_category,
+          rationale: c.rationale,
+          body_excerpt: c.body_excerpt
+        })),
+        source_event_ids: unpromoted.map((c) => c.id),
+        notes: `Curated batch of ${unpromoted.length} operator rationale(s)`,
+        created_by: "operator",
+        status: "active"
+      });
+      toast(`Promoted ${unpromoted.length} corrections into active set ${newSet.version}`, "success");
+      loadAuditData();
+    } catch (err: any) {
+      toast(err?.message || "Failed to promote example set", "warning");
+    } finally {
+      setPromoting(false);
+    }
+  };
 
   const handleExportAuditLedger = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
@@ -109,7 +151,7 @@ export function RLAuditSection() {
               }}
             >
               <ShieldCheck size={14} />
-              ADR-006 & §19 Compliant
+              ADR-006 and section 19 compliant
             </span>
             <Button
               variant="primary"
@@ -143,6 +185,13 @@ export function RLAuditSection() {
             <span className="rl-kpi-label">Foundational Weight Drift</span>
             <span className="rl-kpi-val" style={{ color: "#059669" }}>0.00%</span>
             <span className="rl-kpi-sub">Weights frozen; memory in-context</span>
+          </div>
+          <div className="rl-kpi-card">
+            <span className="rl-kpi-label">Pending Corrections</span>
+            <span className="rl-kpi-val" style={{ color: "#b45309" }}>
+              {candidates.filter((c) => !c.is_promoted).length}
+            </span>
+            <span className="rl-kpi-sub">Awaiting curation into a versioned set</span>
           </div>
         </div>
       </div>
@@ -378,6 +427,62 @@ export function RLAuditSection() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Section 2.5: Correction Candidates Awaiting Promotion. This is the
+          actual human-gated step ADR-006 describes: an operator correction
+          only ever reaches a prompt after someone reviews it here and clicks
+          Promote - nothing is injected automatically as corrections accrue. */}
+      <div className="card" style={{ padding: "20px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Sparkles size={16} style={{ color: "var(--primary)" }} />
+            <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0 }}>
+              Correction Candidates Awaiting Promotion ({candidates.filter((c) => !c.is_promoted).length})
+            </h3>
+          </div>
+          <Button
+            variant="primary"
+            className="btn-sm"
+            icon={<CheckCircle2 size={14} />}
+            onClick={handlePromoteBatch}
+            disabled={promoting || candidates.filter((c) => !c.is_promoted).length === 0}
+          >
+            {promoting ? "Freezing..." : "Promote Active Set"}
+          </Button>
+        </div>
+        <p style={{ fontSize: "12px", color: "var(--ink-muted)", margin: "0 0 14px 0", lineHeight: 1.5 }}>
+          Operator corrections do not automatically inject into models. Human rationales accumulate as candidates here,
+          which are curated and frozen into an immutable versioned set pinned to <code className="mono">policy_version</code>.
+        </p>
+
+        {candidates.filter((c) => !c.is_promoted).length === 0 ? (
+          <div style={{ textAlign: "center", padding: "24px", color: "var(--ink-muted)", fontSize: "13px" }}>
+            No corrections awaiting promotion. Correcting a case's category on the case page adds a candidate here.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {candidates.filter((c) => !c.is_promoted).map((cand) => (
+              <div key={cand.id} style={{ background: "var(--bg-subtle)", border: "1px solid var(--border-default)", borderRadius: "8px", padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
+                  <Link href={`/cases/${cand.case_id}`} style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "var(--primary)", fontWeight: 700, fontSize: "12.5px", textDecoration: "none" }}>
+                    <span>{cand.email_id}</span>
+                    <ExternalLink size={11} />
+                  </Link>
+                  <span className="mono" style={{ fontSize: "11px", color: "var(--ink-muted)" }}>
+                    {cand.old_category} <span style={{ margin: "0 4px" }}>→</span> <strong style={{ color: "var(--ink-primary)" }}>{cand.new_category}</strong>
+                  </span>
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--ink-primary)", fontStyle: "italic", marginBottom: "4px" }}>
+                  &ldquo;{cand.rationale}&rdquo;
+                </div>
+                <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }} title={cand.subject}>
+                  {cand.subject}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Section 3: Promoted Prompt Example Sets */}

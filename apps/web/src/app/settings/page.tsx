@@ -1,247 +1,222 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Check, CheckCircle2, CircleHelp, Database, RefreshCw, RotateCcw, Server, ShieldCheck, Sparkles, TriangleAlert, XCircle } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Camera,
+  Check,
+  CheckCircle2,
+  RefreshCw,
+  RotateCcw,
+  Server,
+  Upload,
+  UserRound,
+} from "lucide-react";
 import { useToast } from "../../components/Toast";
-import { Button, PageHeader, StatusBadge } from "../../components/UI";
+import { Button, PageHeader } from "../../components/UI";
 import { apiClient, type ReadinessStatus } from "../../api/client";
 
-const cx = (...values: Array<string | false | undefined | null>) => values.filter(Boolean).join(" ");
+const PROFILE_KEY = "cleardraft-profile";
 
-type ServiceState = "checking" | "ready" | "unavailable";
+type Profile = {
+  name: string;
+  role: string;
+  photo: string;
+};
 
-function serviceIcon(state: ServiceState) {
-  if (state === "checking") return <RefreshCw size={14} className="spin" />;
-  if (state === "ready") return <Check size={14} className="success-text" />;
-  return <XCircle size={14} className="danger-text" />;
-}
+const defaultProfile: Profile = {
+  name: "Kian Lok",
+  role: "Lead Operator",
+  photo: "",
+};
 
-function serviceLabel(state: ServiceState) {
-  if (state === "checking") return "Checking";
-  if (state === "ready") return "Ready";
-  return "Unavailable";
+function initials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "OP";
 }
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const [mode, setMode] = useState<"rules" | "live">("rules");
-  const [keepBytes, setKeepBytes] = useState(true);
-  const [traceLogs, setTraceLogs] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [profile, setProfile] = useState<Profile>(defaultProfile);
   const [readiness, setReadiness] = useState<ReadinessStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
-  const [recovering, setRecovering] = useState(false);
-  const [benchmarkInfo, setBenchmarkInfo] = useState<any>(null);
-  const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("cleardraft-settings");
-      if (saved) {
-        const parsed = JSON.parse(saved) as { mode?: "rules" | "live"; keepBytes?: boolean; traceLogs?: boolean };
-        if (parsed.mode) setMode(parsed.mode);
-        if (typeof parsed.keepBytes === "boolean") setKeepBytes(parsed.keepBytes);
-        if (typeof parsed.traceLogs === "boolean") setTraceLogs(parsed.traceLogs);
-      }
+      const saved = localStorage.getItem(PROFILE_KEY);
+      if (saved) setProfile({ ...defaultProfile, ...JSON.parse(saved) });
     } catch {
-      // Defaults remain truthful if local preferences are unavailable.
+      // Keep the default profile when local preferences are unavailable.
     }
   }, []);
 
-  const checkReadiness = () => {
+  const checkReadiness = async () => {
     setChecking(true);
-    apiClient
-      .getReadiness()
-      .then((status) => {
-        setReadiness(status);
-        setLastChecked(status.checkedAt);
-        toast(status.ready ? "API readiness confirmed" : "API responded but is not ready", status.ready ? "success" : "warning");
-      })
-      .catch(() => {
-        const status: ReadinessStatus = { ready: false, database: false, error: "unreachable", checkedAt: new Date().toISOString() };
-        setReadiness(status);
-        setLastChecked(status.checkedAt);
-        toast("API readiness check failed · backend is unreachable", "warning");
-      })
-      .finally(() => setChecking(false));
-  };
-  useEffect(() => {
-    checkReadiness();
-    apiClient.getBenchmarkInfo().then(setBenchmarkInfo).catch(() => {});
-  }, []);
-
-  const handleRecoverBestData = async () => {
-    if (recovering) return;
-    setRecovering(true);
     try {
-      const res = await apiClient.recoverBestData();
-      toast(res.message || "Optimal benchmark restored · All test RL cleared", "success");
-      setRestoredNotice(`Restored at ${new Date(res.restored_at).toLocaleTimeString()} · Benchmark: 100.0% category, 98.8% exact match, 0 RL overrides.`);
-      checkReadiness();
-    } catch (err: any) {
-      toast(err?.message || "Failed to recover benchmark data", "warning");
+      const status = await apiClient.getReadiness();
+      setReadiness(status);
+      setLastChecked(status.checkedAt);
+      toast(status.ready ? "Backend is ready" : "Backend responded but is not ready", status.ready ? "success" : "warning");
+    } catch {
+      const status: ReadinessStatus = {
+        ready: false,
+        database: false,
+        error: "unreachable",
+        checkedAt: new Date().toISOString(),
+      };
+      setReadiness(status);
+      setLastChecked(status.checkedAt);
+      toast("Backend check failed", "warning");
     } finally {
-      setRecovering(false);
+      setChecking(false);
     }
   };
 
-  const savePreferences = () => {
-    localStorage.setItem("cleardraft-settings", JSON.stringify({ mode, keepBytes, traceLogs }));
-    toast("Workspace preferences saved locally", "success");
+  useEffect(() => {
+    void checkReadiness();
+  }, []);
+
+  const saveProfile = () => {
+    const trimmedName = profile.name.trim();
+    if (!trimmedName) {
+      toast("Enter a name before saving", "warning");
+      return;
+    }
+    setSaving(true);
+    const nextProfile = { ...profile, name: trimmedName };
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(nextProfile));
+    window.dispatchEvent(new CustomEvent("cleardraft-profile-updated"));
+    setProfile(nextProfile);
+    window.setTimeout(() => setSaving(false), 250);
+    toast("Profile saved", "success");
   };
 
-  const backendState: ServiceState = checking ? "checking" : readiness?.ready ? "ready" : "unavailable";
-  const databaseState: ServiceState = checking ? "checking" : readiness?.database ? "ready" : "unavailable";
+  const handlePhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast("Choose an image file", "warning");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast("Photo must be under 2 MB", "warning");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setProfile((current) => ({ ...current, photo: String(reader.result || "") }));
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
+
+  const resetWorkspace = () => {
+    const confirmed = window.confirm(
+      "Reset ClearDraft? This will clear saved profile settings, cached cases, and local preferences, then restart the app."
+    );
+    if (!confirmed) return;
+    localStorage.clear();
+    toast("Local data cleared. Restarting...", "info");
+    window.setTimeout(() => window.location.reload(), 350);
+  };
+
+  const backendLabel = checking ? "Checking" : readiness?.ready ? "Ready" : "Unavailable";
+  const backendTone = checking ? "info" : readiness?.ready ? "success" : "danger";
 
   return (
-    <div className="content-wrap">
+    <div className="content-wrap settings-page">
       <PageHeader
-        title={
-          <span>
-            Workspace <span className="title-gradient-accent">Settings</span>
-          </span>
-        }
-        description="Manage local execution preferences, pipeline rules engine, and verified API readiness."
+        eyebrow="Workspace"
+        title={<span>Settings</span>}
+        description="Manage your operator profile and keep the local workspace ready for testing."
         actions={
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <Button
-              variant="secondary"
-              icon={<RefreshCw size={14} className={checking ? "spin" : undefined} />}
-              onClick={checkReadiness}
-              disabled={checking}
-            >
-              {checking ? "Checking…" : "Check health"}
-            </Button>
-            <Button variant="primary" icon={<Check size={15} />} onClick={savePreferences}>
-              Save changes
-            </Button>
-          </div>
+          <Button variant="primary" icon={<Check size={15} />} onClick={saveProfile} disabled={saving}>
+            {saving ? "Saving..." : "Save profile"}
+          </Button>
         }
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-        {/* Benchmark Baseline & RL Recovery Card */}
-        <div className="card" style={{ gridColumn: "span 2", border: "1px solid rgba(16, 185, 129, 0.4)", background: "linear-gradient(180deg, var(--surface) 0%, rgba(16, 185, 129, 0.04) 100%)" }}>
+      <div className="settings-layout">
+        <section className="card settings-profile-card">
           <div className="card-heading">
             <div>
-              <span className="eyebrow" style={{ fontSize: "10px", color: "var(--success)" }}>
-                BENCHMARK BASELINE &amp; REINFORCEMENT RESET
-              </span>
-              <h3>Recover Optimal Benchmark Data</h3>
+              <span className="eyebrow" style={{ fontSize: "10px" }}>PROFILE</span>
+              <h3>Operator profile</h3>
             </div>
-            <span className="status-badge success" style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-              <ShieldCheck size={13} />
-              <span>100.0% Validated Golden Set</span>
+            <UserRound size={18} style={{ color: "var(--ink-faint)" }} aria-hidden="true" />
+          </div>
+
+          <div className="settings-profile-content">
+            <div className="settings-avatar-column">
+              <div className="settings-avatar" aria-label={profile.photo ? "Uploaded profile photo" : "Profile initials"}>
+                {profile.photo ? <img src={profile.photo} alt="" /> : <span>{initials(profile.name)}</span>}
+                <span className="settings-avatar-camera" aria-hidden="true"><Camera size={13} /></span>
+              </div>
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhoto} hidden />
+              <button className="text-btn settings-upload-btn" type="button" onClick={() => fileInputRef.current?.click()}>
+                <Upload size={13} /> Upload photo
+              </button>
+              <span className="settings-helper">JPG, PNG or WEBP - 2 MB max</span>
+            </div>
+
+            <div className="settings-form-grid">
+              <label className="settings-field">
+                <span>Display name</span>
+                <input value={profile.name} onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))} placeholder="Your name" autoComplete="name" />
+              </label>
+              <label className="settings-field">
+                <span>Role</span>
+                <input value={profile.role} onChange={(event) => setProfile((current) => ({ ...current, role: event.target.value }))} placeholder="Your role" autoComplete="organization-title" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section className="card settings-backend-card">
+          <div className="card-heading">
+            <div>
+              <span className="eyebrow" style={{ fontSize: "10px" }}>CONNECTION</span>
+              <h3>Backend status</h3>
+            </div>
+            <span className={`status-badge ${backendTone}`}>
+              {checking ? <RefreshCw size={12} className="spin" /> : readiness?.ready ? <CheckCircle2 size={12} /> : <Server size={12} />}
+              {backendLabel}
             </span>
           </div>
 
-          <p style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "10px", lineHeight: "1.5" }}>
-            Revert workspace database and evaluation results to our verified peak benchmark state.
-            Any operator in-context reinforcement learning (RL), prompt example sets, or experimental category/field corrections
-            accumulated during testing will be cleared, restoring the dataset to exact reproducibility.
-          </p>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginTop: "16px" }}>
-            <div style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-subtle)", border: "1px solid var(--border)" }}>
-              <span style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 600 }}>Category Accuracy</span>
-              <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--success)", marginTop: "2px" }}>
-                {benchmarkInfo?.accuracy?.category_accuracy || "100.0%"}
-              </div>
-              <span style={{ fontSize: "11px", color: "var(--ink-faint)" }}>520/520 shipments</span>
-            </div>
-            <div style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-subtle)", border: "1px solid var(--border)" }}>
-              <span style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 600 }}>Exact Verification Match</span>
-              <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--success)", marginTop: "2px" }}>
-                {benchmarkInfo?.accuracy?.exact_match || "98.8%"}
-              </div>
-              <span style={{ fontSize: "11px", color: "var(--ink-faint)" }}>514/520 shipments</span>
-            </div>
-            <div style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-subtle)", border: "1px solid var(--border)" }}>
-              <span style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 600 }}>False Clears &amp; Alarms</span>
-              <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--success)", marginTop: "2px" }}>0 / 0</div>
-              <span style={{ fontSize: "11px", color: "var(--ink-faint)" }}>Zero unflagged errors</span>
-            </div>
-            <div style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-subtle)", border: "1px solid var(--border)" }}>
-              <span style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 600 }}>Optimal Foundation</span>
-              <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--ink)", marginTop: "4px" }}>
-                {benchmarkInfo?.model || "deepseek-chat (V3)"}
-              </div>
-              <span style={{ fontSize: "11px", color: "var(--ink-faint)" }}>520 cases · 8 concurrent</span>
+          <div className="settings-status-row">
+            <div className="settings-status-icon"><Server size={18} /></div>
+            <div>
+              <strong>ClearDraft API</strong>
+              <p>{readiness ? (readiness.ready ? "Readiness endpoint confirmed." : `Unavailable${readiness.error ? ` - ${readiness.error}` : ""}.`) : "No check run yet."}</p>
             </div>
           </div>
 
-          {restoredNotice && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "8px", background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)", marginTop: "16px", fontSize: "12.5px", color: "var(--success)" }}>
-              <CheckCircle2 size={16} />
-              <span>{restoredNotice}</span>
-            </div>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "var(--ink-muted)" }}>
-              <Sparkles size={14} style={{ color: "var(--primary)" }} />
-              <span>Testing utility: safely clears prompt example sets, review events, and reverts database to benchmark.</span>
-            </div>
-            <Button
-              variant="secondary"
-              icon={<RotateCcw size={14} className={recovering ? "spin" : undefined} />}
-              onClick={handleRecoverBestData}
-              disabled={recovering}
-              style={{ borderColor: "rgba(16, 185, 129, 0.5)", color: "var(--success)", fontWeight: 600 }}
-            >
-              {recovering ? "Restoring benchmark data…" : "Recover our best data"}
+          <div className="settings-status-footer">
+            <span>{lastChecked ? `Last checked ${new Date(lastChecked).toLocaleTimeString()}` : "No check run yet"}</span>
+            <Button variant="secondary" icon={<RefreshCw size={13} className={checking ? "spin" : undefined} />} onClick={() => void checkReadiness()} disabled={checking}>
+              {checking ? "Testing..." : "Test backend"}
             </Button>
           </div>
-        </div>
+        </section>
 
-        <div className="card">
-          <div className="card-heading">
-            <div><span className="eyebrow" style={{ fontSize: "10px" }}>PIPELINE ENGINE</span><h3>Processing Mode</h3></div>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "12px" }}>
-            <button className={cx("card", mode === "rules" && "selected")} style={{ padding: "14px", cursor: "pointer", textAlign: "left", border: mode === "rules" ? "2px solid var(--primary)" : "1px solid var(--border-default)", background: mode === "rules" ? "var(--primary-subtle)" : "var(--bg-surface)" }} onClick={() => setMode("rules")}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}><strong>Local rules + recorded replay</strong><span className="status-badge success">Recommended</span></div>
-              <p style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px" }}>Deterministic extraction for clean machine test runs. No external network transmission.</p>
-            </button>
-            <button className={cx("card", mode === "live" && "selected")} style={{ padding: "14px", cursor: "pointer", textAlign: "left", border: mode === "live" ? "2px solid var(--primary)" : "1px solid var(--border-default)", background: mode === "live" ? "var(--primary-subtle)" : "var(--bg-surface)" }} onClick={() => setMode("live")}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}><strong>Live AI provider adapter</strong><span className="status-badge warning">Optional</span></div>
-              <p style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "4px" }}>Only use when the backend is configured for a live provider. This preference does not make one available.</p>
-            </button>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-heading">
-            <div><span className="eyebrow" style={{ fontSize: "10px" }}>READINESS CHECKS</span><h3>System Status</h3></div>
-            <span className={cx("status-badge", backendState === "ready" ? "success" : backendState === "checking" ? "info" : "danger")}><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>{serviceIcon(backendState)} {serviceLabel(backendState)}</span></span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border-subtle)" }}>
-              <div style={{ display: "flex", gap: "9px", alignItems: "flex-start" }}><Server size={16} style={{ color: "var(--primary)", marginTop: 2 }} /><div><strong style={{ fontSize: "13px" }}>FastAPI backend</strong><p style={{ fontSize: "11px", color: "var(--ink-muted)" }}>{readiness ? (readiness.ready ? "Readiness endpoint confirmed" : `Not ready${readiness.error ? ` · ${readiness.error}` : ""}`) : "Not checked"}</p></div></div>
-              <span className={cx("status-badge", backendState === "ready" ? "success" : backendState === "checking" ? "info" : "danger")}>{serviceLabel(backendState)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border-subtle)" }}>
-              <div style={{ display: "flex", gap: "9px", alignItems: "flex-start" }}><Database size={16} style={{ color: "var(--primary)", marginTop: 2 }} /><div><strong style={{ fontSize: "13px" }}>SQLite database</strong><p style={{ fontSize: "11px", color: "var(--ink-muted)" }}>{readiness?.database ? "Database query succeeded" : "No confirmed database connection"}</p></div></div>
-              <span className={cx("status-badge", databaseState === "ready" ? "success" : databaseState === "checking" ? "info" : "danger")}>{serviceLabel(databaseState)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0" }}>
-              <div style={{ display: "flex", gap: "9px", alignItems: "flex-start" }}><CircleHelp size={16} style={{ color: "var(--ink-faint)", marginTop: 2 }} /><div><strong style={{ fontSize: "13px" }}>Organizer evaluator</strong><p style={{ fontSize: "11px", color: "var(--ink-muted)" }}>Isolated from this app; check Evaluation after external submission.</p></div></div>
-              <span className="status-badge muted">Not checked</span>
+        <section className="card settings-reset-card">
+          <div className="settings-reset-copy">
+            <div className="settings-warning-icon"><AlertTriangle size={18} /></div>
+            <div>
+              <span className="eyebrow" style={{ fontSize: "10px", color: "var(--danger-text)" }}>DANGER ZONE</span>
+              <h3>Reset workspace</h3>
+              <p>This clears all local data and restarts the app.</p>
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "14px" }}>
-            <span style={{ fontSize: "11px", color: "var(--ink-faint)" }}>{lastChecked ? `Last checked ${new Date(lastChecked).toLocaleTimeString()}` : "No readiness check yet"}</span>
-            <button className="text-btn" onClick={checkReadiness} disabled={checking}><RefreshCw size={12} className={checking ? "spin" : undefined} /> {checking ? "Checking…" : "Check readiness"}</button>
-          </div>
-        </div>
-
-        <div className="card" style={{ gridColumn: "span 2" }}>
-          <div className="card-heading"><div><span className="eyebrow" style={{ fontSize: "10px" }}>SECURITY &amp; RETENTION</span><h3>Local Data Handling</h3></div></div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "12px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", gap: "10px" }}><ShieldCheck size={17} className="success-text" /><div><strong>Keep immutable source bytes</strong><p style={{ fontSize: "12px", color: "var(--ink-muted)" }}>Store raw bytes in local storage root for cryptographically verifiable provenance.</p></div></div><button className={cx("switch-control", keepBytes && "on")} onClick={() => setKeepBytes((value) => !value)} aria-label="Toggle keep source bytes"><span className="switch-thumb" /></button></div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border-subtle)", paddingTop: "14px" }}><div style={{ display: "flex", gap: "10px" }}><TriangleAlert size={17} className="warning-text" /><div><strong>Protected trace logging</strong><p style={{ fontSize: "12px", color: "var(--ink-muted)" }}>Retain structured parser and model diagnostic traces for 7 days.</p></div></div><button className={cx("switch-control", traceLogs && "on")} onClick={() => setTraceLogs((value) => !value)} aria-label="Toggle trace logging"><span className="switch-thumb" /></button></div>
-          </div>
-        </div>
+          <Button variant="danger" icon={<RotateCcw size={14} />} onClick={resetWorkspace}>Reset workspace</Button>
+        </section>
       </div>
     </div>
   );

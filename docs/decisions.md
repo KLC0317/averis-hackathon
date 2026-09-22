@@ -96,7 +96,7 @@ instant prompt alteration from single unreviewed corrections is explicitly
 forbidden.
 
 **Reason:** In-context prompt injection is stateless and does not alter model
-weights. Overriding §19 requires satisfying the "reviewed policy and regression
+weights. Overriding section 19 requires satisfying the "reviewed policy and regression
 tests" requirement. Three architectural guards prevent regression:
 1. **Signal integrity:** Only human-typed rationales are candidate examples. Tier
    agreement and isolated ground truth are never used as training/prompt signals.
@@ -136,4 +136,3 @@ explicit human approval.
 can continuously teach system conventions without requiring developer code changes,
 and the full provenance of every equivalence decision remains inspectable in
 the audit ledger.
-

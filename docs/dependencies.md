@@ -15,8 +15,8 @@ not claim dependency snapshots unless those commands were actually run.
 | PyMuPDF | PDF text, geometry, and OCR bridge | AGPL/commercial; verify the selected distribution license before redistribution |
 | python-docx | DOCX paragraph/table extraction | MIT |
 | openpyxl | XLSX cell extraction | MIT |
-| React, React DOM, React Router | Review workspace UI | MIT |
-| Vite, TypeScript | Web build and type checking | MIT |
+| Next.js, React, React DOM | Review workspace UI and App Router routing | MIT |
+| TypeScript | Type checking | Apache-2.0 |
 | lucide-react | Accessible SVG icons | ISC |
 
 The application does not require a GPU, vector database, or autonomous-agent

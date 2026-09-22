@@ -3,6 +3,7 @@ import { Inter, Manrope, JetBrains_Mono } from "next/font/google";
 import "../styles/globals.css";
 import { ToastProvider } from "../components/Toast";
 import { AppShell } from "../components/AppShell";
+import { InitialAppWarmup } from "../components/InitialAppWarmup";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -50,6 +51,7 @@ export default function RootLayout({
       <body>
         <ToastProvider>
           <AppShell>
+            <InitialAppWarmup />
             {children}
           </AppShell>
         </ToastProvider>
@@ -57,4 +59,3 @@ export default function RootLayout({
     </html>
   );
 }
-

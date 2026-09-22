@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,6 +16,13 @@ import { Button, PageHeader, StatusBadge } from "../../components/UI";
 
 const cx = (...values: Array<string | false | undefined | null>) => values.filter(Boolean).join(" ");
 
+const LIVE_TABLE_MIN_ID = 19;
+const isVisibleInQueueTable = (item: CaseSummary) => {
+  if (!item.emailId.startsWith("email_live_")) return true;
+  const match = /^email_live_(\d+)$/.exec(item.emailId);
+  return match ? Number(match[1]) >= LIVE_TABLE_MIN_ID : false;
+};
+
 export default function InboxPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -29,76 +36,140 @@ export default function InboxPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
+  // "bulk" is the default single-largest-import view (unchanged behavior);
+  // "mailbox" aggregates every live-retrieved import into one growing inbox.
+  // Each retrieve creates its own immutable import internally, so without this
+  // the largest bulk/demo corpus would always outrank a handful of new mail.
+  const [source, setSource] = useState<"bulk" | "mailbox">("bulk");
+  // Always holds the latest source, read synchronously on every render (not in
+  // an effect) so an in-flight request's .then can tell whether it's still
+  // current by the time the response arrives.
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
 
-  // Support direct filter linking via query parameter (e.g. from sidebar To-do list)
+  // Support direct filter/source linking via query parameter. The default,
+  // plain "/inbox" (no params) always lands on Imports - the primary bulk/demo
+  // corpus - and never live mail. source=mailbox is an explicit, one-shot
+  // request to switch to the live view; it's deliberately not remembered
+  // across navigations, so a later plain /inbox link always returns to
+  // Imports rather than silently staying on whatever was last viewed.
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const f = params.get("filter");
       if (f) setFilter(f);
+      const s = params.get("source");
+      if (s === "mailbox") {
+        setSource("mailbox");
+      }
     }
   }, []);
 
-  // Stale-while-revalidate API load with instant cache display
-  useEffect(() => {
-    let cancelled = false;
+  const loadCases = (opts?: { useCache?: boolean }) => {
+    const useCache = opts?.useCache !== false;
+    // Capture which source this specific request was issued for. Two requests
+    // can be in flight at once (e.g. on mount, before the URL-param effect has
+    // applied) and the bulk corpus fetch (520 cases) is far larger than a
+    // mailbox fetch, so it can resolve seconds later - if it did, and the
+    // view has since moved on, its result must be discarded rather than
+    // silently overwriting whatever is now on screen.
+    const requestedSource = source;
 
-    // 1. Fast hydrate from storage on mount (prevents SSR hydration mismatch)
-    const cached = getCachedCases();
-    if (cached && cached.length > 0) {
-      setCasesList(cached);
-      setLoading(false);
-    }
-    const cachedM = getCachedMetrics();
-    if (cachedM) {
-      setMetrics(cachedM);
+    // The shared cache holds the bulk/demo corpus other pages (e.g. /todo)
+    // also read from; the mailbox view is intentionally never cached there so
+    // it can't leak a small live-mail slice into other pages' expectations.
+    if (requestedSource === "bulk" && useCache) {
+      const cached = getCachedCases();
+      if (cached && cached.length > 0) {
+        setCasesList(cached);
+        setLoading(false);
+      }
+      const cachedM = getCachedMetrics();
+      if (cachedM) setMetrics(cachedM);
     }
 
-    // 2. Background fresh sync
-    apiClient.listCases({ limit: "1000" })
+    const listParams = requestedSource === "mailbox"
+      ? { limit: "1000", source: "mailbox" as const }
+      : { limit: "1000" };
+
+    return apiClient.listCases(listParams)
       .then((data) => {
-        if (!cancelled && data && data.length > 0) {
-          setCasesList(data);
-          setCachedCases(data);
-          setLoading(false);
-        }
+        if (sourceRef.current !== requestedSource) return; // stale response, view has since moved on
+        setCasesList(data ?? []);
+        if (requestedSource === "bulk" && data && data.length > 0) setCachedCases(data);
+        setLoading(false);
       })
       .catch(() => {
-        if (!cancelled) setLoading(false);
+        if (sourceRef.current !== requestedSource) return;
+        setLoading(false);
       });
+  };
 
-    apiClient.getMetrics()
-      .then((m) => {
-        if (!cancelled && m) {
-          setMetrics(m);
-          setCachedMetrics(m);
-        }
-      })
-      .catch(() => {});
-
+  // Re-fetch whenever the source view changes. loadCases() guards its own
+  // state updates against staleness via sourceRef; the metrics call below
+  // guards itself with this effect's own `cancelled` flag.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    loadCases();
+    if (source === "bulk") {
+      apiClient.getMetrics()
+        .then((m) => {
+          if (!cancelled && m) {
+            setMetrics(m);
+            setCachedMetrics(m);
+          }
+        })
+        .catch(() => {});
+    } else {
+      // Keep the funnel tied to the same aggregated mailbox scope as the
+      // table. This prevents bulk-import totals from leaking into live mail.
+      apiClient.getMetrics(undefined, "mailbox")
+        .then((m) => {
+          if (!cancelled) setMetrics(m);
+        })
+        .catch(() => {
+          if (!cancelled) setMetrics(null);
+        });
+    }
     return () => {
       cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source]);
 
-  const handleRefresh = () => {
+  const pollMailbox = async (): Promise<number | null> => {
+    try {
+      const connections = await apiClient.listMailboxConnections();
+      const connectionId = connections[0]?.id;
+      if (!connectionId) return 0;
+      const result = await apiClient.retrieveMailbox(connectionId, { mode: "live" });
+      return result.new_count;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleRefresh = async () => {
     setRefreshing(true);
+    const newCount = await pollMailbox();
     Promise.all([
-      apiClient.listCases({ limit: "1000" }).then((data) => {
-        if (data && data.length > 0) {
-          setCasesList(data);
-          setCachedCases(data);
-        }
-      }),
-      apiClient.getMetrics().then((m) => {
-        if (m) {
-          setMetrics(m);
-          setCachedMetrics(m);
-        }
-      })
+      loadCases({ useCache: false }),
+      source === "bulk"
+        ? apiClient.getMetrics().then((m) => {
+            if (m) {
+              setMetrics(m);
+              setCachedMetrics(m);
+            }
+          })
+        : apiClient.getMetrics(undefined, "mailbox").then((m) => setMetrics(m))
     ])
       .then(() => {
-        toast("Queue refreshed with latest inbound comparisons");
+        toast(newCount == null
+          ? "Mailbox poll unavailable Â· Queue refreshed from the latest import"
+          : newCount > 0
+            ? `Mailbox poll found ${newCount} new email${newCount === 1 ? "" : "s"}`
+            : "Mailbox poll complete Â· No new emails");
       })
       .catch(() => {
         toast("Connected to local verification cache · Queue is up to date");
@@ -108,6 +179,7 @@ export default function InboxPage() {
 
   const filtered = useMemo(() => {
     return casesList.filter((item) => {
+      if (!isVisibleInQueueTable(item)) return false;
       const textMatch = `${item.subject} ${item.emailId} ${item.sender}`.toLowerCase().includes(query.toLowerCase());
       if (!textMatch) return false;
       if (filter === "All cases") return true;
@@ -143,14 +215,14 @@ export default function InboxPage() {
   const arbitration = comparisons.filter((item) => item.state === "Needs classification review");
   const needsHumanTotal = comparisons.filter((item) => item.state !== "Complete");
 
-  const totalInbound = metrics?.funnel?.total_inbound ?? (casesList.length > 0 ? casesList.length : null);
-  const totalComparisons = metrics?.funnel?.comparisons ?? (comparisons.length > 0 ? comparisons.length : null);
-  const autoCleared = metrics?.funnel?.auto_cleared ?? (complete.length > 0 ? complete.length : null);
+  const totalInbound = metrics?.funnel?.total_inbound ?? (loading ? null : casesList.length);
+  const totalComparisons = metrics?.funnel?.comparisons ?? (loading ? null : comparisons.length);
+  const autoCleared = metrics?.funnel?.auto_cleared ?? (loading ? null : complete.length);
   const autoClearedPct = totalComparisons && autoCleared != null
     ? Math.round((autoCleared / totalComparisons) * 100)
     : null;
-  const needsHuman = metrics?.funnel?.needs_human ?? (needsHumanTotal.length > 0 ? needsHumanTotal.length : null);
-  const arbitrationAction = metrics?.funnel?.arbitration_action ?? (arbitration.length > 0 ? arbitration.length : null);
+  const needsHuman = metrics?.funnel?.needs_human ?? (loading ? null : needsHumanTotal.length);
+  const arbitrationAction = metrics?.funnel?.arbitration_action ?? (loading ? null : arbitration.length);
   const counterpartyAction = metrics?.funnel?.counterparty_action ?? null;
   const operatorAction = metrics?.funnel?.operator_action ?? null;
   const verificationAction = counterpartyAction != null && operatorAction != null
@@ -180,6 +252,55 @@ export default function InboxPage() {
         description="Shipping document verification & evidence queue."
         actions={
           <>
+            {/* "Imports" (default) is the primary bulk/demo corpus only. Live
+                mail stays out of it entirely until this toggle is switched to
+                "Live Mailbox" - kept as two clearly separate views rather than
+                merged, so retrieved mail never quietly mixes into the corpus
+                being reviewed. */}
+            <div
+              role="group"
+              aria-label="Case source"
+              style={{
+                display: "flex", border: "1px solid var(--border-default)",
+                borderRadius: "6px", overflow: "hidden"
+              }}
+            >
+              {([
+                { key: "bulk", label: "Imports" },
+                { key: "mailbox", label: "Live Mailbox" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => {
+                    setSource(opt.key);
+                    setPage(1);
+                  }}
+                  style={{
+                    padding: "6px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                    border: "none",
+                    background: source === opt.key ? "var(--primary)" : "transparent",
+                    color: source === opt.key ? "#ffffff" : "var(--ink-secondary)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px"
+                  }}
+                >
+                  {opt.key === "mailbox" && (
+                    <span
+                      style={{
+                        width: "7px",
+                        height: "7px",
+                        borderRadius: "50%",
+                        background: source === "mailbox" ? "#86efac" : "#22c55e",
+                        display: "inline-block"
+                      }}
+                    />
+                  )}
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <Button
               variant="secondary"
               icon={<RefreshCw size={15} className={refreshing ? "spin" : undefined} />}
@@ -195,6 +316,19 @@ export default function InboxPage() {
           </>
         }
       />
+
+      {source === "mailbox" && !loading && casesList.length === 0 && (
+        <div
+          style={{
+            background: "rgba(59, 130, 246, 0.08)", border: "1px solid rgba(59, 130, 246, 0.3)",
+            borderRadius: "8px", padding: "12px 16px", marginBottom: "16px",
+            fontSize: "13px", color: "var(--ink-secondary)"
+          }}
+        >
+          No live-retrieved mail yet. Go to <Link href="/live" style={{ fontWeight: 600 }}>Live Mailbox</Link> and
+          click Retrieve — new cases will appear here automatically.
+        </div>
+      )}
 
       {/* Verification Funnel & Workload Pipeline */}
       <div className="funnel-panel">

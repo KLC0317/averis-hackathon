@@ -65,6 +65,10 @@ const defaultBlLines = [
   "Gross Weight: 21,577 KG"
 ];
 
+function previewBlocksToLines(blocks: Array<{ text?: string }>): string[] {
+  return blocks.flatMap((block) => (block.text ?? "").split(/\r?\n/));
+}
+
 let moduleAllCasesCache: CaseSummary[] = [];
 
 // A case is a problem case if it is not Complete or still has confirmed differences / unresolved fields
@@ -106,7 +110,7 @@ function CaseDetailView({ id }: { id: string }) {
     const siId = initialDetail?.siDocument?.id;
     if (siId) {
       const hit = apiClient.getCachedSourcePreview?.(siId);
-      if (hit?.blocks?.length) return hit.blocks.map((b) => b.text);
+      if (hit?.blocks?.length) return previewBlocksToLines(hit.blocks);
     }
     return [];
   });
@@ -114,7 +118,7 @@ function CaseDetailView({ id }: { id: string }) {
     const blId = initialDetail?.blDocument?.id;
     if (blId) {
       const hit = apiClient.getCachedSourcePreview?.(blId);
-      if (hit?.blocks?.length) return hit.blocks.map((b) => b.text);
+      if (hit?.blocks?.length) return previewBlocksToLines(hit.blocks);
     }
     return [];
   });
@@ -199,8 +203,8 @@ function CaseDetailView({ id }: { id: string }) {
       ]);
 
       if (!cancelled) {
-        if (siP?.blocks?.length) setSiLines(siP.blocks.map((b) => b.text));
-        if (blP?.blocks?.length) setBlLines(blP.blocks.map((b) => b.text));
+        if (siP?.blocks?.length) setSiLines(previewBlocksToLines(siP.blocks));
+        if (blP?.blocks?.length) setBlLines(previewBlocksToLines(blP.blocks));
       }
     }).catch(() => {
       if (!cancelled) {
@@ -260,13 +264,17 @@ function CaseDetailView({ id }: { id: string }) {
 
   const siLinesToRender = useMemo(() => {
     if (siLines.length > 0) return siLines;
-    if (detail.siSource && detail.siSource.length > 0) return detail.siSource;
+    if (detail.siSource && detail.siSource.length > 0) {
+      return detail.siSource.flatMap((text) => text.split(/\r?\n/));
+    }
     return defaultSiLines;
   }, [siLines, detail.siSource]);
 
   const blLinesToRender = useMemo(() => {
     if (blLines.length > 0) return blLines;
-    if (detail.blSource && detail.blSource.length > 0) return detail.blSource;
+    if (detail.blSource && detail.blSource.length > 0) {
+      return detail.blSource.flatMap((text) => text.split(/\r?\n/));
+    }
     return defaultBlLines;
   }, [blLines, detail.blSource]);
 
@@ -276,7 +284,11 @@ function CaseDetailView({ id }: { id: string }) {
     if (!targetVal || targetVal === "Missing" || targetVal === "Not provided") return false;
     const cleanTarget = targetVal.trim().toLowerCase();
     const cleanLine = line.trim().toLowerCase();
-    if (cleanLine.includes(cleanTarget)) return true;
+
+    // Avoid substring matching tiny values (for example `2`), which can make
+    // every nearby year, page number, or quantity look like the selected
+    // field. Short values are matched by their field label below instead.
+    if (cleanTarget.length >= 3 && cleanLine.includes(cleanTarget)) return true;
 
     // Secondary field name heuristic
     if (field.key === "shipper" && /^shipper/i.test(cleanLine)) return true;
@@ -627,7 +639,7 @@ function CaseDetailView({ id }: { id: string }) {
         category: correctingCategory,
         rationale: correctionRationale.trim(),
         expectedCaseVersion: detail.caseVersion,
-        operator: "Jordan Diaz"
+        operator: "Kian Lok"
       });
       toast(`Category corrected to ${res.category} · Case re-verified`, "success");
       setCorrectionModalOpen(false);
@@ -694,6 +706,7 @@ function CaseDetailView({ id }: { id: string }) {
               </span>
               <span style={{ color: "#cbd5e1" }}>·</span>
               <span
+                className="case-meta-status"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -898,7 +911,7 @@ function CaseDetailView({ id }: { id: string }) {
 
       {/* Status Banner */}
       {!hasComparisonFields ? (
-        <div className="case-status-banner" style={{ background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+        <div className="case-status-banner banner-inbound" style={{ background: "#eff6ff", border: "1px solid #bfdbfe" }}>
           <div className="banner-left">
             <div className="banner-icon-circle" style={{ background: "#2563eb", color: "#ffffff" }}>
               <Mail size={18} strokeWidth={2.5} />
@@ -1254,7 +1267,7 @@ function CaseDetailView({ id }: { id: string }) {
                         {currentPrecedent.match_basis === "normalized"
                           ? "Different wording, same underlying value after normalization · "
                           : ""}
-                        Prior operator taught this convention · §19 Review Aid (Never silently auto-cleared)
+                        Prior operator taught this convention · Section 19 review aid (Never silently auto-cleared)
                       </p>
                     </div>
                   </div>
@@ -1404,7 +1417,11 @@ function CaseDetailView({ id }: { id: string }) {
 
                   <div className="viewer-lines-container">
                     {siLinesToRender.map((line, idx) => {
-                      const isHighlighted = isLineMatch(line, currentField, true);
+                      // A value can legitimately occur in more than one source
+                      // line (for example a country in an address and route).
+                      // Highlight only the first evidence match so selecting a
+                      // field never makes the entire document look selected.
+                      const isHighlighted = idx === siHighlightIdx;
                       return (
                         <div
                           key={idx}
@@ -1448,7 +1465,7 @@ function CaseDetailView({ id }: { id: string }) {
 
                   <div className="viewer-lines-container">
                     {blLinesToRender.map((line, idx) => {
-                      const isHighlighted = isLineMatch(line, currentField, false);
+                      const isHighlighted = idx === blHighlightIdx;
                       return (
                         <div
                           key={idx}
@@ -2161,7 +2178,7 @@ function CaseDetailView({ id }: { id: string }) {
               />
             </div>
 
-            {/* §19 Invariant Notice */}
+            {/* Section 19 invariant notice */}
             <div style={{
               background: "rgba(99, 102, 241, 0.05)",
               border: "1px solid rgba(99, 102, 241, 0.2)",
@@ -2176,7 +2193,7 @@ function CaseDetailView({ id }: { id: string }) {
             }}>
               <Info size={14} style={{ color: "#6366f1", flexShrink: 0 }} />
               <span>
-                <strong>Safety Invariant (§19):</strong> Learned equivalences surface as 1-click confirmation hints for future operators, but will <em>never</em> silently auto-clear without human verification.
+                <strong>Safety Invariant (section 19):</strong> Learned equivalences surface as 1-click confirmation hints for future operators, but will <em>never</em> silently auto-clear without human verification.
               </span>
             </div>
 

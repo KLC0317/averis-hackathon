@@ -16,18 +16,21 @@ export default function ImportsPage() {
   const { toast } = useToast();
   const [dragging, setDragging] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [importRows, setImportRows] = useState<ImportRecord[]>(fixtureImports);
+  const [importRows, setImportRows] = useState<ImportRecord[]>([]);
   const [liveConnected, setLiveConnected] = useState(false);
+  const [importsLoading, setImportsLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [runningImportId, setRunningImportId] = useState<string | null>(null);
 
   const refreshImports = () => {
+    setImportsLoading(true);
     apiClient
-      .listImports()
+      // Include mailbox batches so the import history preserves the previous
+      // live email instead of making each retrieve look like a replacement.
+      .listImports(true)
       .then(async (rows) => {
-        const bundleRows = rows.filter((r) => r.name !== "mailbox" && (r as any).source_mode !== "mailbox");
         const withMetrics = await Promise.all(
-          bundleRows.map(async (row) => {
+          rows.map(async (row) => {
             try {
               const m = await apiClient.getMetrics(row.id);
               return { ...row, comparisons: m.comparisons, needsReview: m.needsReview + m.needsClassificationReview };
@@ -39,7 +42,13 @@ export default function ImportsPage() {
         setImportRows(withMetrics);
         setLiveConnected(true);
       })
-      .catch(() => setLiveConnected(false));
+      .catch(() => {
+        setLiveConnected(false);
+        // Fixtures are a deliberate offline fallback, never the initial
+        // loading state shown before the API has answered.
+        setImportRows(fixtureImports);
+      })
+      .finally(() => setImportsLoading(false));
   };
 
   useEffect(refreshImports, []);
@@ -111,14 +120,14 @@ export default function ImportsPage() {
         }
       />
 
-      {!liveConnected && (
+      {!liveConnected && !importsLoading && (
         <div className="callout" style={{ marginBottom: 20 }}>
           <ShieldCheck size={16} />
           <span>API unreachable - showing example data below. Start the backend to import and run against real data.</span>
         </div>
       )}
 
-      <section className="import-grid">
+      <section className="import-grid" aria-busy={importsLoading || uploading}>
         <div
           className={cx("drop-card", dragging && "dragging")}
           onDragOver={(e) => {
@@ -133,21 +142,30 @@ export default function ImportsPage() {
             if (file) handleUpload(file);
           }}
         >
-          <div className="drop-icon-wrap">
-            <FileArchive size={26} />
+          <div className="drop-icon-wrap" aria-hidden="true">
+            {importsLoading || uploading ? <RefreshCw size={26} className="spin" /> : <FileArchive size={26} />}
           </div>
-          <h2>{uploading ? `Uploading ${pendingFile?.name}…` : pendingFile ? pendingFile.name : "Drop a participant bundle here"}</h2>
+          {importsLoading ? (
+            <>
+              <div className="skeleton-line skeleton-shimmer" style={{ width: "210px", height: "22px", margin: "0 auto 10px" }} />
+              <p role="status">Loading document imports…</p>
+            </>
+          ) : (
+            <h2>{uploading ? `Uploading ${pendingFile?.name}…` : pendingFile ? pendingFile.name : "Drop a participant bundle here"}</h2>
+          )}
           <p>
-            {pendingFile
+            {importsLoading
+              ? "Preparing the import workspace"
+              : pendingFile
               ? uploading
                 ? "Sending to the API…"
                 : "Bundle sent - see the manifest to the right."
               : "Drag & drop ZIP archive or click below · Raw source bytes remain immutable"}
           </p>
 
-          <label className="btn btn-secondary">
-            <Upload size={15} />
-            Browse archive
+          <label className="btn btn-secondary" style={{ opacity: importsLoading || uploading ? 0.65 : 1, pointerEvents: importsLoading || uploading ? "none" : "auto" }}>
+            {uploading ? <RefreshCw size={15} className="spin" /> : <Upload size={15} />}
+            {uploading ? "Uploading…" : "Browse archive"}
             <input
               id="bundle-file-input"
               type="file"
@@ -176,18 +194,30 @@ export default function ImportsPage() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div className="card">
+          <div className="card" aria-busy={importsLoading}>
             <div className="card-heading">
               <div>
                 <span className="eyebrow" style={{ fontSize: "10px" }}>
-                  {current ? "CURRENT ACTIVE MANIFEST" : "NO LIVE IMPORT"}
+                  {importsLoading ? "LOADING IMPORT MANIFEST" : current ? "CURRENT ACTIVE MANIFEST" : "NO LIVE IMPORT"}
                 </span>
-                <h3>{current ? current.name : "Import a bundle to see its manifest"}</h3>
+                {importsLoading ? (
+                  <div className="skeleton-line skeleton-shimmer" style={{ width: "220px", height: "20px", marginTop: "8px" }} />
+                ) : (
+                  <h3>{current ? current.name : "Import a bundle to see its manifest"}</h3>
+                )}
               </div>
-              {current && <StatusBadge status={current.status} />}
+              {importsLoading ? (
+                <div className="skeleton-line skeleton-shimmer" style={{ width: "68px", height: "22px", borderRadius: "6px" }} />
+              ) : current && <StatusBadge status={current.status} />}
             </div>
 
             <div className="manifest-grid">
+              {importsLoading ? Array.from({ length: 4 }, (_, index) => (
+                <div key={`manifest-skeleton-${index}`} aria-hidden="true">
+                  <div className="skeleton-line skeleton-shimmer" style={{ width: "70px", height: "12px", marginBottom: "8px" }} />
+                  <div className="skeleton-line skeleton-shimmer" style={{ width: "110px", height: "18px" }} />
+                </div>
+              )) : <>
               <div>
                 <span>Emails</span>
                 <strong>{current ? `${current.emails} messages` : "—"}</strong>
@@ -221,6 +251,7 @@ export default function ImportsPage() {
                 <span>Ingested</span>
                 <strong>{current ? current.createdAt : "—"}</strong>
               </div>
+              </>}
             </div>
 
             <div
@@ -235,14 +266,14 @@ export default function ImportsPage() {
                 variant="primary"
                 icon={<Play size={15} />}
                 onClick={handleStartRun}
-                disabled={!current || runningImportId !== null}
+                disabled={importsLoading || !current || runningImportId !== null}
               >
                 {runningImportId ? "Running pipeline…" : "Start run"}
               </Button>
               <Button
                 variant="secondary"
                 icon={<Download size={15} />}
-                disabled={!current}
+                disabled={importsLoading || !current}
                 onClick={() => {
                   if (!current) return;
                   const blob = new Blob([JSON.stringify(current, null, 2)], { type: "application/json" });
@@ -283,7 +314,18 @@ export default function ImportsPage() {
             </tr>
           </thead>
           <tbody>
-            {importRows.map((item) => (
+            {importsLoading ? Array.from({ length: 4 }, (_, index) => (
+              <tr key={`import-skeleton-${index}`} aria-hidden="true">
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "180px", height: "16px" }} /></td>
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "100px", height: "14px" }} /></td>
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "70px", height: "22px", borderRadius: "6px" }} /></td>
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "42px", height: "14px" }} /></td>
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "42px", height: "14px" }} /></td>
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "42px", height: "14px" }} /></td>
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "42px", height: "14px" }} /></td>
+                <td><div className="skeleton-line skeleton-shimmer" style={{ width: "16px", height: "16px" }} /></td>
+              </tr>
+            )) : importRows.map((item) => (
               <tr key={item.id}>
                 <td>
                   <div className="cell-primary">
@@ -317,6 +359,13 @@ export default function ImportsPage() {
                 </td>
               </tr>
             ))}
+            {!importsLoading && importRows.length === 0 && (
+              <tr>
+                <td colSpan={8} style={{ padding: "28px", textAlign: "center", color: "var(--ink-muted)" }}>
+                  No import batches available yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

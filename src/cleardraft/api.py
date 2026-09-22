@@ -36,6 +36,15 @@ except Exception:  # pragma: no cover - enables core-only installs
     FastAPI = None  # type: ignore
 
 
+LIVE_MAILBOX_MIN_EMAIL_NUMBER = 19
+
+
+def _is_visible_mailbox_email(email_id: str | None) -> bool:
+    """Keep the live demo queue/KPIs aligned with the visible email range."""
+    match = re.fullmatch(r"email_live_(\d+)", str(email_id or ""))
+    return bool(match and int(match.group(1)) >= LIVE_MAILBOX_MIN_EMAIL_NUMBER)
+
+
 def _state(verification: str | None, processing: str | None, reason: str | None = None,
            classification_review: bool = False, disposition: str | None = None) -> str:
     if processing not in {"SUCCEEDED", "FAILED"}:
@@ -302,22 +311,51 @@ def create_app(db_path: str | None = None):
     @app.get("/api/v1/cases")
     @app.get("/cases")
     def list_cases(import_id: str | None = None, category: str | None = None, state: str | None = None,
-                   query: str | None = None, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:
+                   query: str | None = None, limit: int = 1000, offset: int = 0,
+                   source: str | None = None) -> list[dict[str, Any]]:
         with store.connect() as db:
-            if not import_id:
+            if source == "mailbox":
+                # A live mailbox is conceptually one growing inbox, but each retrieve
+                # creates its own immutable import (imports are hash-addressed
+                # batches, never mutated in place - see get_or_create_import). This
+                # aggregates across every mailbox-sourced import instead of picking
+                # a single one, so cases from separate retrieves don't compete
+                # against each other or against a bulk/demo corpus by email count.
+                import_ids = [r["id"] for r in db.execute(
+                    "SELECT id FROM imports WHERE source_mode='mailbox'").fetchall()]
+                if not import_ids:
+                    return []
+            elif import_id:
+                import_ids = [import_id]
+            else:
+                # No explicit filter: the default view is the primary bulk/demo
+                # corpus an operator is normally working through. Live mail is
+                # deliberately kept out of this by default - ask for
+                # source=mailbox to see it, which also keeps it out of the
+                # bulk-scoped funnel/KPI numbers.
                 row = db.execute("SELECT id FROM imports ORDER BY email_count DESC, created_at DESC LIMIT 1").fetchone()
-                import_id = row["id"] if row else None
-            if not import_id:
-                return []
-            case_items = [dict(r) for r in db.execute("SELECT * FROM cases WHERE import_id=? ORDER BY email_id", (import_id,)).fetchall()]
+                import_ids = [row["id"]] if row else []
+                if not import_ids:
+                    return []
+
+            # Aggregated mailbox view orders by recency (a live inbox); the
+            # single-import path keeps its original stable ordering unchanged.
+            order_clause = "updated_at DESC" if source == "mailbox" else "email_id"
+            placeholders = ",".join("?" for _ in import_ids)
+            case_items = [dict(r) for r in db.execute(
+                f"SELECT * FROM cases WHERE import_id IN ({placeholders}) ORDER BY {order_clause}",
+                import_ids).fetchall()]
             email_map: dict[str, Any] = {}
-            for r in db.execute("SELECT id, raw_json FROM emails WHERE import_id=?", (import_id,)).fetchall():
+            for r in db.execute(
+                    f"SELECT id, raw_json FROM emails WHERE import_id IN ({placeholders})", import_ids).fetchall():
                 try:
                     email_map[r["id"]] = json.loads(r["raw_json"])
                 except Exception:
                     email_map[r["id"]] = {}
             doc_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for r in db.execute("SELECT id,email_id,filename,format,sha256,size,created_at,attachment_path FROM documents WHERE import_id=? ORDER BY attachment_path", (import_id,)).fetchall():
+            for r in db.execute(
+                    f"SELECT id,email_id,filename,format,sha256,size,created_at,attachment_path FROM documents "
+                    f"WHERE import_id IN ({placeholders}) ORDER BY attachment_path", import_ids).fetchall():
                 doc_map[r["email_id"]].append(dict(r))
             draft_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for r in db.execute("SELECT * FROM drafts ORDER BY created_at DESC").fetchall():
@@ -325,7 +363,8 @@ def create_app(db_path: str | None = None):
 
         values = [_case_payload(store, item, email=email_map.get(item["id"], {}), docs=doc_map.get(item["email_id"], []), drafts=draft_map.get(item["id"], [])) for item in case_items]
         query_lower = (query or "").casefold()
-        filtered = [item for item in values if (not category or item.get("category") == category)
+        filtered = [item for item in values if (source != "mailbox" or _is_visible_mailbox_email(item.get("email_id")))
+                    and (not category or item.get("category") == category)
                     and (not state or item.get("state") == state)
                     and (not query_lower or query_lower in f"{item.get('email_id','')} {item.get('subject','')} {item.get('sender','')}".casefold())]
         return filtered[max(0, offset):max(0, offset) + max(1, min(limit, 2000))]
@@ -795,9 +834,10 @@ def create_app(db_path: str | None = None):
     @app.get("/api/v1/mailbox/connections")
     @app.get("/mailbox/connections")
     def list_mailbox_connections() -> list[dict[str, Any]]:
+        from .mailbox import DEFAULT_PRESETS, resolve_mailbox_credentials
+
         conns = store.list_mailbox_connections()
         if not conns:
-            from .mailbox import DEFAULT_PRESETS
             for p in DEFAULT_PRESETS:
                 store.save_mailbox_connection(
                     conn_id=p["id"],
@@ -809,7 +849,15 @@ def create_app(db_path: str | None = None):
                     folder=p.get("folder", "INBOX"),
                 )
             conns = store.list_mailbox_connections()
-        return conns
+        # The seeded connection carries a placeholder address. Resolve the
+        # effective environment-backed Gmail address before returning it so the
+        # UI displays the same mailbox that retrieval will actually use.
+        return [
+            {**conn, "username": resolve_mailbox_credentials(conn)[0]}
+            if conn.get("provider") == "gmail"
+            else conn
+            for conn in conns
+        ]
 
     @app.get("/api/v1/mailbox/{conn_id}/status")
     @app.get("/mailbox/{conn_id}/status")
@@ -860,15 +908,19 @@ def create_app(db_path: str | None = None):
     @app.post("/api/v1/mailbox/{conn_id}/sync-latest")
     @app.post("/mailbox/{conn_id}/sync-latest")
     def sync_latest_mailbox(conn_id: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Fast-forwards cursor to the highest existing UID in the mailbox.
+        """Fast-forwards cursor past historic mail.
 
-        Allows skipping historic messages so only emails received after this point
-        are retrieved.
+        ``keep_last`` (default 0) controls how much stays visible to the next
+        retrieve: 0 skips everything currently in the mailbox, N parks the
+        cursor so exactly the newest N messages are returned next time.
         """
         from .mailbox import sync_mailbox_cursor_to_latest
         body = body or {}
         try:
-            return sync_mailbox_cursor_to_latest(store, conn_id, password=body.get("password"))
+            return sync_mailbox_cursor_to_latest(
+                store, conn_id, password=body.get("password"),
+                keep_last=int(body.get("keep_last", 0)),
+            )
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         except Exception as exc:
@@ -1039,25 +1091,39 @@ def create_app(db_path: str | None = None):
 
     @app.get("/api/v1/metrics")
     @app.get("/metrics")
-    def metrics(import_id: str | None = None) -> dict[str, Any]:
-        if not import_id:
+    def metrics(import_id: str | None = None, source: str | None = None) -> dict[str, Any]:
+        # Mirrors list_cases' default resolution so the funnel/KPI numbers here
+        # always agree with what the case table actually shows: the primary
+        # bulk/demo corpus by default, or every live-retrieved mailbox import
+        # when source=mailbox isolates the live view.
+        if import_id:
+            import_ids = [import_id]
+        elif source == "mailbox":
+            with store.connect() as db:
+                import_ids = [r["id"] for r in db.execute(
+                    "SELECT id FROM imports WHERE source_mode='mailbox'"
+                ).fetchall()]
+        else:
             with store.connect() as db:
                 row = db.execute("SELECT id FROM imports ORDER BY email_count DESC, created_at DESC LIMIT 1").fetchone()
-            import_id = row["id"] if row else None
-        if not import_id:
+                import_ids = [row["id"]] if row else []
+        if not import_ids:
             return {"cases": 0, "comparisons": 0, "needs_review": 0, "complete": 0}
+        placeholders = ",".join("?" for _ in import_ids)
         with store.connect() as db:
-            case_items = [dict(r) for r in db.execute("SELECT * FROM cases WHERE import_id=? ORDER BY email_id", (import_id,)).fetchall()]
+            case_items = [dict(r) for r in db.execute(
+                f"SELECT * FROM cases WHERE import_id IN ({placeholders}) ORDER BY email_id", import_ids).fetchall()]
             email_map: dict[str, Any] = {}
-            for r in db.execute("SELECT id, raw_json FROM emails WHERE import_id=?", (import_id,)).fetchall():
+            for r in db.execute(
+                    f"SELECT id, raw_json FROM emails WHERE import_id IN ({placeholders})", import_ids).fetchall():
                 try:
                     email_map[r["id"]] = json.loads(r["raw_json"])
                 except Exception:
                     email_map[r["id"]] = {}
             doc_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for r in db.execute(
-                "SELECT id, email_id, filename, format, sha256, size, created_at, attachment_path FROM documents WHERE import_id=? ORDER BY attachment_path",
-                (import_id,)).fetchall():
+                f"SELECT id, email_id, filename, format, sha256, size, created_at, attachment_path FROM documents "
+                f"WHERE import_id IN ({placeholders}) ORDER BY attachment_path", import_ids).fetchall():
                 doc_map[r["email_id"]].append(dict(r))
             draft_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
             try:
@@ -1067,6 +1133,8 @@ def create_app(db_path: str | None = None):
                 pass
 
         cases = [_case_payload(store, item, email=email_map.get(item["id"], {}), docs=doc_map.get(item["email_id"], []), drafts=draft_map.get(item["id"], [])) for item in case_items]
+        if source == "mailbox":
+            cases = [item for item in cases if _is_visible_mailbox_email(item.get("email_id"))]
         comparisons = [item for item in cases if item.get("category") == "BL_COMPARISON"]
         complete_cases = [item for item in comparisons if item.get("state") == "Complete"]
         # Operator-closed cases are off the queue but were never auto-cleared; they
@@ -1100,7 +1168,8 @@ def create_app(db_path: str | None = None):
         time_saved_pct = round((1.0 - (automated_operator_hours / max(0.1, manual_total_hours))) * 100.0, 1)
 
         return {
-            "import_id": import_id,
+            "import_id": import_ids[0] if import_ids else None,
+            "import_ids": import_ids,
             "cases": len(cases),
             "comparisons": len(comparisons),
             "needs_review": len(needs_human_cases),

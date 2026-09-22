@@ -14,6 +14,13 @@ import { ClearDraftBrand, ClearDraftLogo } from "./ClearDraftLogo";
 import { apiClient, getCachedMetrics, setCachedMetrics, type Metrics } from "../api/client";
 
 const cx = (...values: Array<string | false | undefined | null>) => values.filter(Boolean).join(" ");
+const PROFILE_KEY = "cleardraft-profile";
+
+type ShellProfile = { name: string; role: string; photo: string };
+
+function profileInitials(name: string) {
+  return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "OP";
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -26,6 +33,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [dark, setDark] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [profile, setProfile] = useState<ShellProfile>({ name: "Kian Lok", role: "Lead Operator", photo: "" });
+
+  useEffect(() => {
+    const loadProfile = () => {
+      try {
+        const saved = localStorage.getItem(PROFILE_KEY);
+        if (saved) setProfile((current) => ({ ...current, ...JSON.parse(saved) }));
+      } catch {
+        // Keep the default shell profile when local preferences are unavailable.
+      }
+    };
+    loadProfile();
+    window.addEventListener("cleardraft-profile-updated", loadProfile);
+    return () => window.removeEventListener("cleardraft-profile-updated", loadProfile);
+  }, []);
 
   // Live genuine operations metrics for sidebar badges
   useEffect(() => {
@@ -129,29 +151,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
 
             <div className="case-top-user-pill">
-              <span className="case-top-avatar">JD</span>
-              <span className="case-top-user-name">Jordan Diaz</span>
+              <span className="case-top-avatar">{profile.photo ? <img src={profile.photo} alt="" /> : profileInitials(profile.name)}</span>
+              <span className="case-top-user-name">{profile.name}</span>
               <ChevronDown size={13} className="case-top-user-chevron" />
             </div>
           </div>
         </header>
       ) : (
       <aside className={cx("sidebar", collapsed && "sidebar-collapsed", sidebarOpen && "sidebar-mobile-open")}>
-        {/* Subtle Edge Chevron Toggle */}
-        <button
-          type="button"
-          className="sidebar-edge-toggle"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setCollapsed(!collapsed);
-          }}
-          title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-        </button>
-
         <div className="sidebar-top-section">
           {/* Header with Extracted Official Logo & Chevron Collapse Toggle */}
           <div className="sidebar-header">
@@ -304,21 +311,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               className="sidebar-user-profile-btn"
-              onClick={() => toast("Operator profile: Kian Lee · Role: Lead Verifier", "info")}
-              title="User Profile: Kian Lee"
+              onClick={() => toast("Operator profile: Kian Lok · Role: Lead Verifier", "info")}
+              title={`User Profile: ${profile.name}`}
               aria-label="Operator Profile"
             >
               <div className="avatar-ring-wrap">
-                <span className="avatar">KL</span>
+                <span className="avatar">{profile.photo ? <img src={profile.photo} alt="" /> : profileInitials(profile.name)}</span>
                 <span className="avatar-online-dot" />
               </div>
               {!collapsed && (
                 <div className="user-details">
-                  <strong>Kian Lee</strong>
-                  <span>Lead Operator</span>
+                  <strong>{profile.name}</strong>
+                  <span>{profile.role}</span>
                 </div>
               )}
-              {collapsed && <span className="rail-tooltip">Kian Lee (Lead)</span>}
+              {collapsed && <span className="rail-tooltip">{profile.name}</span>}
             </button>
 
             {/* Dark Mode Button directly beside the profile */}

@@ -106,7 +106,7 @@ The evaluator's reliability implementation is less strict than its prose: its co
 
 | Layer | Default | Rationale |
 | --- | --- | --- |
-| UI | React, TypeScript, Vite | Responsive review workspace with typed API client |
+| UI | Next.js, React, TypeScript | Responsive review workspace with typed API client |
 | UI components | Accessible headless primitives and a small design system | Keyboard interactions, dialogs, tables, and consistent states |
 | API | Python, FastAPI, Pydantic | Shared typed contracts and convenient parsing ecosystem |
 | Persistence | SQLite on a local volume, SQLAlchemy, Alembic | Reproducible single-machine setup and explicit migrations |

@@ -39,10 +39,10 @@ python -m uvicorn cleardraft.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ```powershell
-npm --prefix apps/web run dev -- --host 127.0.0.1
+npm --prefix apps/web run dev -- -H 127.0.0.1
 ```
 
-The Vite client uses the local API adapter during development. For a
+The Next.js client uses the local API adapter during development. For a
 single-command startup and the persisted volume, use Compose instead.
 
 ## Import and process the supplied bundle
